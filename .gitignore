@@ -2,3 +2,6 @@ Makefile
 bin/
 bin-inc/
 nbproject/
+
+#VS project files
+*.vcxproj*
