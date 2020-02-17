@@ -1,7 +1,7 @@
 project "imgui"
 	kind "StaticLib"
 	language "C++"
-	cppdialect "C++17"
+	cppdialect "C++14"
 	staticruntime "on"
 
 	targetdir ("bin/" .. outputdir.. "/")
@@ -28,6 +28,7 @@ project "imgui"
 		optimize "on"
 
 	filter "system:linux"
+	-- needed?
 		buildoptions "-fPIC"
 
 	filter "system:windows"
