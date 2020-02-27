@@ -5,3 +5,9 @@ nbproject/
 
 #VS project files
 *.vcxproj*
+
+# Codelite
+compile_flags.txt
+imgui.mk
+imgui.project
+imgui.txt
