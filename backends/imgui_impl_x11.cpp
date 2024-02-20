@@ -325,10 +325,22 @@ IMGUI_IMPL_API void ImGui_ImplX11_ProcessEvent(void *event)
 		case KeyRelease:
 		{
 			// key modifiers...
+			ImGuiIO& io = ImGui::GetIO();
+			{ // takes care of modifier keys
+				unsigned int ks = xevent->xkey.state;
+				io.AddKeyEvent(ImGuiMod_Ctrl, ks & ControlMask);
+				io.AddKeyEvent(ImGuiMod_Shift, ks & ShiftMask);
+				io.AddKeyEvent(ImGuiMod_Alt, ks & (Mod1Mask | Mod5Mask));
+				io.AddKeyEvent(ImGuiMod_Super, ks & Mod4Mask);
+			}
+
 			KeySym ks = XLookupKeysym(&xevent->xkey, 0);
+			ImGuiKey imgui_key = ImGui_ImplX11_KeySymToImGuiKey(ks);
+			bool is_key_down = xevent->type == KeyPress;
+
 			ImGui_ImplX11_AddKeyEvent(
-				ImGui_ImplX11_KeySymToImGuiKey(ks),
-				xevent->type == KeyPress,
+				imgui_key,
+				is_key_down,
 				xevent->xkey.keycode
 			);
 			if(xevent->type == KeyPress && ks >= ' ' && ks <= '~') {
