@@ -5,8 +5,8 @@ project "imgui"
 	cppdialect "C++17"
 	staticruntime "on"
 
-	targetdir ("bin/" .. outputdir.. "/")
-	objdir("bin-inc/" .. outputdir .. "/%{prj.name}")
+	targetdir (engine.lib)
+	objdir (engine.intermediate)
 
 	includedirs {
 		"./",
