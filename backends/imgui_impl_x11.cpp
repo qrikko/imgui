@@ -1,6 +1,9 @@
 #include "imgui.h"
 #include <X11/X.h>
+#include <X11/Xutil.h>
+#include <bits/types/struct_timeval.h>
 #include <cstdint>
+#include <sys/select.h>
 #ifndef IMGUI_DISABLE
 #include "imgui_impl_x11.h"
 
@@ -8,10 +11,16 @@ extern "C" {
 	#include <X11/Xlib.h>
 	#include <X11/cursorfont.h>
 	#include <X11/keysym.h>
+	#include <sys/time.h>
 }
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
 //  2024-02-17: Backend: First parts of implementing mouse support to X11 backend
+
+struct TimingData {
+	unsigned long long time;
+	unsigned long long ticks_per_second;
+};
 
 struct ImGui_ImplX11_Data
 {
@@ -20,7 +29,12 @@ struct ImGui_ImplX11_Data
 
     ImGuiMouseCursor      LastMouseCursor;
 	uint8_t               scroll_speed;
+
+	TimingData            time;
+	unsigned int          mod_flags;
 };
+
+
 
 static ImGui_ImplX11_Data* ImGui_ImplX11_GetBackendData()
 {
@@ -43,6 +57,13 @@ IMGUI_IMPL_API void ImGui_ImplX11_Init(void *window, void *display)
 	bd->wnd = *(Window*)window;
 	bd->dpy = (Display *)display;
 	bd->scroll_speed = 1;
+	bd->mod_flags = 0;
+
+    struct timeval start_time;
+	gettimeofday(&start_time, NULL);
+
+	bd->time.ticks_per_second = 1000000;
+	bd->time.time = (unsigned long long)start_time.tv_sec * bd->time.ticks_per_second + (unsigned long long)start_time.tv_usec;
 
 	ImGuiViewport *main_viewport = ImGui::GetMainViewport();
 	main_viewport->PlatformHandle = main_viewport->PlatformHandleRaw = (void *)bd->wnd;
@@ -98,14 +119,6 @@ static bool ImGui_ImplX11_UpdateMouseCursor() {
     return true;
 }
 
-static void ImGui_ImplX11_AddKeyEvent(ImGuiKey key, bool down, int native_keycode, int native_scancode = -1)
-{
-    ImGuiIO& io = ImGui::GetIO();
-    io.AddKeyEvent(key, down);
-    io.SetKeyEventNativeData(key, native_keycode, native_scancode); // To support legacy indexing (<1.87 user code)
-    IM_UNUSED(native_scancode);
-}
-
 void ImGui_ImplX11_NewFrame()
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -121,18 +134,13 @@ void ImGui_ImplX11_NewFrame()
     //    ImGui_ImplWin32_UpdateMonitors();
 
     // Setup time step
-/*
-	INT64 current_time = 0;
-    ::QueryPerformanceCounter((LARGE_INTEGER*)&current_time);
-    io.DeltaTime = (float)(current_time - bd->Time) / bd->TicksPerSecond;
-    bd->Time = current_time;
+    struct timeval now;
+	gettimeofday(&now, NULL);
 
-    // Update OS mouse position
-    ImGui_ImplWin32_UpdateMouseData();
+	int64_t microsec = (unsigned long long)now.tv_sec * bd->time.ticks_per_second + (unsigned long long)now.tv_usec;
+	io.DeltaTime = (float)(microsec - bd->time.time) / bd->time.ticks_per_second;
+	bd->time.time = microsec;
 
-    // Process workarounds for known Windows key handling issues
-    ImGui_ImplWin32_ProcessKeyEventsWorkarounds();
-*/
     // Update OS mouse cursor with the cursor requested by imgui
     ImGuiMouseCursor mouse_cursor = io.MouseDrawCursor ? ImGuiMouseCursor_None : ImGui::GetMouseCursor();
     if (bd->LastMouseCursor != mouse_cursor)
@@ -140,9 +148,6 @@ void ImGui_ImplX11_NewFrame()
         bd->LastMouseCursor = mouse_cursor;
         ImGui_ImplX11_UpdateMouseCursor();
     }
-
-    // Update game controllers (if enabled and available)
-    //ImGui_ImplWin32_UpdateGamepads();
 }
 
 static ImGuiKey ImGui_ImplX11_KeySymToImGuiKey(KeySym key)
@@ -271,6 +276,17 @@ static ImGuiKey ImGui_ImplX11_KeySymToImGuiKey(KeySym key)
     }
 }
 
+static void ImGui_ImplX11_UpdateKeyModifiers(const KeySym &key) {
+	ImGuiIO &io = ImGui::GetIO();
+    ImGui_ImplX11_Data* bd = ImGui_ImplX11_GetBackendData();
+
+	io.AddKeyEvent(ImGuiMod_Ctrl,  (bd->mod_flags & ControlMask) != 0);
+	io.AddKeyEvent(ImGuiMod_Shift, (bd->mod_flags & ShiftMask) != 0);
+	io.AddKeyEvent(ImGuiMod_Alt,   (bd->mod_flags & (Mod1Mask | Mod5Mask)) != 0);
+	io.AddKeyEvent(ImGuiMod_Super, (bd->mod_flags & Mod4Mask) != 0);
+
+}
+
 IMGUI_IMPL_API void ImGui_ImplX11_ProcessEvent(void *event)
 {
 	XEvent *xevent = (XEvent *)event;
@@ -324,32 +340,41 @@ IMGUI_IMPL_API void ImGui_ImplX11_ProcessEvent(void *event)
 		case KeyPress:
 		case KeyRelease:
 		{
-			// key modifiers...
-			ImGuiIO& io = ImGui::GetIO();
-			{ // takes care of modifier keys
-				unsigned int ks = xevent->xkey.state;
-				io.AddKeyEvent(ImGuiMod_Ctrl, ks & ControlMask);
-				io.AddKeyEvent(ImGuiMod_Shift, ks & ShiftMask);
-				io.AddKeyEvent(ImGuiMod_Alt, ks & (Mod1Mask | Mod5Mask));
-				io.AddKeyEvent(ImGuiMod_Super, ks & Mod4Mask);
-			}
-
 			KeySym ks = XLookupKeysym(&xevent->xkey, 0);
 			ImGuiKey imgui_key = ImGui_ImplX11_KeySymToImGuiKey(ks);
 			bool is_key_down = xevent->type == KeyPress;
 
-			ImGui_ImplX11_AddKeyEvent(
-				imgui_key,
-				is_key_down,
-				xevent->xkey.keycode
-			);
-			if(xevent->type == KeyPress && ks >= ' ' && ks <= '~') {
-				io.AddInputCharacter(ks);
+			if (imgui_key != ImGuiKey_None) {
+				if(xevent->type == KeyPress && ks >= ' ' && ks <= '~') {
+					char buffer[32];// = XKeysymToString(ks);
+					XLookupString(&xevent->xkey, buffer, sizeof(buffer), &ks, NULL);
+					io.AddInputCharacter((unsigned int)buffer[0]);
+				} else {
+					io.AddKeyEvent(imgui_key, is_key_down);
+				}
 			}
+			// Since the xevent.xkey.state typically is not updated in time, it becomes
+			// tricky to make use of it for knowing the Modifiers. So for example
+			// if I press left shift we will not be able to update based on the state.
+			// So instead I opted to make use of the Masks and store the state in our
+			// backend data. There probably are better solutions, and it would be nice
+			// to not be dependent on the backend data.
+			if (imgui_key == ImGuiKey_LeftShift || imgui_key == ImGuiKey_RightShift) {
+				bd->mod_flags = (bd->mod_flags & ~ShiftMask) | (is_key_down ? ShiftMask : 0);
+			}
+			if (imgui_key == ImGuiKey_LeftCtrl || imgui_key == ImGuiKey_RightCtrl) {
+				bd->mod_flags = (bd->mod_flags & ~ControlMask) | (is_key_down ? ControlMask : 0);
+			}
+			if (imgui_key == ImGuiKey_LeftSuper || imgui_key == ImGuiKey_RightSuper) {
+				bd->mod_flags = (bd->mod_flags & ~Mod4Mask) | (is_key_down ? Mod4Mask : 0);
+			}
+			if (imgui_key == ImGuiKey_LeftAlt || imgui_key == ImGuiKey_RightAlt) {
+				bd->mod_flags = (bd->mod_flags & ~(Mod1Mask | Mod5Mask)) | (is_key_down ? (Mod1Mask | Mod5Mask) : 0);
+			}
+			ImGui_ImplX11_UpdateKeyModifiers(ks);
 		}
 		break;
 	}
-
 }
 
 #endif
