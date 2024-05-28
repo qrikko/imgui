@@ -9,6 +9,7 @@
 
 extern "C" {
 	#include <X11/Xlib.h>
+	#include <X11/Xatom.h>
 	#include <X11/cursorfont.h>
 	#include <X11/keysym.h>
 	#include <sys/time.h>
@@ -17,6 +18,8 @@ extern "C" {
 // (minor and older changes stripped away, please see git history for details)
 //  2024-02-17: Backend: First parts of implementing mouse support to X11 backend
 
+static void ImGui_ImplX11_InitPlatformInterface();
+
 struct TimingData {
 	unsigned long long time;
 	unsigned long long ticks_per_second;
@@ -24,8 +27,8 @@ struct TimingData {
 
 struct ImGui_ImplX11_Data
 {
-	Window                wnd;
-	Display               *dpy;
+	Window window;
+	Display *display;
 
     ImGuiMouseCursor      LastMouseCursor;
 	uint8_t               scroll_speed;
@@ -33,7 +36,6 @@ struct ImGui_ImplX11_Data
 	TimingData            time;
 	unsigned int          mod_flags;
 };
-
 
 
 static ImGui_ImplX11_Data* ImGui_ImplX11_GetBackendData()
@@ -54,8 +56,11 @@ IMGUI_IMPL_API void ImGui_ImplX11_Init(void *window, void *display)
     io.BackendFlags |= ImGuiBackendFlags_PlatformHasViewports;    // We can create multi-viewports on the Platform side (optional)
     io.BackendFlags |= ImGuiBackendFlags_HasMouseHoveredViewport; // We can call io.AddMouseViewportEvent() with correct data (optional)
 
-	bd->wnd = *(Window*)window;
-	bd->dpy = (Display *)display;
+	bd->window = *(Window*)window;
+
+	IM_ASSERT(window != None && "bd->window not set to a valid window!");
+
+	bd->display = (Display *)display;
 	bd->scroll_speed = 1;
 	bd->mod_flags = 0;
 
@@ -66,9 +71,9 @@ IMGUI_IMPL_API void ImGui_ImplX11_Init(void *window, void *display)
 	bd->time.time = (unsigned long long)start_time.tv_sec * bd->time.ticks_per_second + (unsigned long long)start_time.tv_usec;
 
 	ImGuiViewport *main_viewport = ImGui::GetMainViewport();
-	main_viewport->PlatformHandle = main_viewport->PlatformHandleRaw = (void *)bd->wnd;
+	main_viewport->PlatformHandle = main_viewport->PlatformHandleRaw = (void *)&bd->window;
 	if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-//		ImGui_ImplX11_InitPlatformInterface(platform_has_own_dc);
+		ImGui_ImplX11_InitPlatformInterface();
 	}
 }
 
@@ -90,31 +95,31 @@ static bool ImGui_ImplX11_UpdateMouseCursor() {
         // In xlib we basically create an empty pixmap and bind it as cursor to make it invisible
         XColor color = { 0 };
 		const char data[] = { 0 };
-		Pixmap pixmap = XCreateBitmapFromData(bd->dpy, (Window)bd->wnd, data, 1, 1);
-		x11_cursor = XCreatePixmapCursor(bd->dpy, pixmap, pixmap, &color, &color, 0, 0);
+		Pixmap pixmap = XCreateBitmapFromData(bd->display, (Window)bd->window, data, 1, 1);
+		x11_cursor = XCreatePixmapCursor(bd->display, pixmap, pixmap, &color, &color, 0, 0);
 
-		XDefineCursor(bd->dpy, (Window)bd->wnd, x11_cursor);
-		XFreeCursor(bd->dpy, x11_cursor);
-		XFreePixmap(bd->dpy, pixmap);
+		XDefineCursor(bd->display, (Window)bd->window, x11_cursor);
+		XFreeCursor(bd->display, x11_cursor);
+		XFreePixmap(bd->display, pixmap);
     }
     else
     {
         // Show OS mouse cursor
         switch (imgui_cursor)
         {
-        case ImGuiMouseCursor_Arrow:        x11_cursor = XCreateFontCursor(bd->dpy, XC_arrow); break;
-        case ImGuiMouseCursor_TextInput:    x11_cursor = XCreateFontCursor(bd->dpy, XC_xterm); break;
-        case ImGuiMouseCursor_ResizeAll:    x11_cursor = XCreateFontCursor(bd->dpy, XC_fleur); break;
-        case ImGuiMouseCursor_ResizeEW:     x11_cursor = XCreateFontCursor(bd->dpy, XC_sb_h_double_arrow); break;
-        case ImGuiMouseCursor_ResizeNS:     x11_cursor = XCreateFontCursor(bd->dpy, XC_sb_v_double_arrow); break;
-        case ImGuiMouseCursor_ResizeNESW:   x11_cursor = XCreateFontCursor(bd->dpy, XC_bottom_left_corner); break;
-        case ImGuiMouseCursor_ResizeNWSE:   x11_cursor = XCreateFontCursor(bd->dpy, XC_bottom_right_corner); break;
-        case ImGuiMouseCursor_Hand:         x11_cursor = XCreateFontCursor(bd->dpy, XC_hand2); break;
-        case ImGuiMouseCursor_NotAllowed:   x11_cursor = XCreateFontCursor(bd->dpy, XC_X_cursor); break;
-		default: x11_cursor = XCreateFontCursor(bd->dpy, XC_left_ptr); break;
+        case ImGuiMouseCursor_Arrow:        x11_cursor = XCreateFontCursor(bd->display, XC_arrow); break;
+        case ImGuiMouseCursor_TextInput:    x11_cursor = XCreateFontCursor(bd->display, XC_xterm); break;
+        case ImGuiMouseCursor_ResizeAll:    x11_cursor = XCreateFontCursor(bd->display, XC_fleur); break;
+        case ImGuiMouseCursor_ResizeEW:     x11_cursor = XCreateFontCursor(bd->display, XC_sb_h_double_arrow); break;
+        case ImGuiMouseCursor_ResizeNS:     x11_cursor = XCreateFontCursor(bd->display, XC_sb_v_double_arrow); break;
+        case ImGuiMouseCursor_ResizeNESW:   x11_cursor = XCreateFontCursor(bd->display, XC_bottom_left_corner); break;
+        case ImGuiMouseCursor_ResizeNWSE:   x11_cursor = XCreateFontCursor(bd->display, XC_bottom_right_corner); break;
+        case ImGuiMouseCursor_Hand:         x11_cursor = XCreateFontCursor(bd->display, XC_hand2); break;
+        case ImGuiMouseCursor_NotAllowed:   x11_cursor = XCreateFontCursor(bd->display, XC_X_cursor); break;
+		default: x11_cursor = XCreateFontCursor(bd->display, XC_left_ptr); break;
         }
-		XDefineCursor(bd->dpy, (Window)bd->wnd, x11_cursor);
-		XFreeCursor(bd->dpy, x11_cursor);
+		XDefineCursor(bd->display, (Window)bd->window, x11_cursor);
+		XFreeCursor(bd->display, x11_cursor);
     }
     return true;
 }
@@ -127,7 +132,7 @@ void ImGui_ImplX11_NewFrame()
 
     // Setup display size (every frame to accommodate for window resizing)
 	XWindowAttributes attr;
-	XGetWindowAttributes (bd->dpy, bd->wnd, &attr);
+	XGetWindowAttributes (bd->display, bd->window, &attr);
 
     io.DisplaySize = ImVec2((float)(attr.width), (float)(attr.height));
     //if (bd->WantUpdateMonitors)
@@ -376,5 +381,358 @@ IMGUI_IMPL_API void ImGui_ImplX11_ProcessEvent(void *event)
 		break;
 	}
 }
+
+
+struct ImGui_ImplX11_ViewportData {
+	Window window;
+	Window parent;
+	Display *display;
+	bool owned;
+
+    ImGui_ImplX11_ViewportData() {
+		window = parent = 0;
+		owned = false;
+	}
+    ~ImGui_ImplX11_ViewportData() {
+		IM_ASSERT(window == 0);
+	}
+};
+static void ImGui_ImplX11_ShowWindow(ImGuiViewport *);
+
+Window ImGui_ImplX11_GetWinFromViewportID(ImGuiID viewport_id) {
+	if (viewport_id != 0) {
+		if (ImGuiViewport *viewport = ImGui::FindViewportByID(viewport_id)) {
+			Window *w = (Window *)viewport->PlatformHandle;
+			return (Window) *w;
+		}
+	}
+	return 0;
+}
+
+static void ImGui_ImplX11_CreateWindow(ImGuiViewport *viewport) {
+	ImGui_ImplX11_ViewportData *vd = IM_NEW(ImGui_ImplX11_ViewportData)();
+	viewport->PlatformUserData = vd;
+
+	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
+
+	ImGuiViewport *main_viewport = ImGui::GetMainViewport();
+	ImGui_ImplX11_ViewportData *main_viewport_data = (ImGui_ImplX11_ViewportData *)main_viewport->PlatformUserData;
+
+	Window root = XDefaultRootWindow(bd->display);
+	vd->parent = ImGui_ImplX11_GetWinFromViewportID(viewport->ParentViewportId);
+	//vd->parent = root;
+
+	// create window
+	vd->window = XCreateSimpleWindow(
+		bd->display,
+		root,
+		0, 0,
+		viewport->Size.x,
+		viewport->Size.y,
+		1,
+		0,
+		0
+	);
+	vd->owned = true;
+
+	XSelectInput(
+		bd->display,
+		vd->window,
+        ExposureMask
+        | PointerMotionMask
+        | KeyPressMask
+        | KeyReleaseMask
+        | ButtonPressMask
+        | ButtonReleaseMask
+        | StructureNotifyMask
+    );
+
+
+	viewport->PlatformRequestResize = false;
+	viewport->PlatformHandle = viewport->PlatformHandleRaw = &vd->window;
+
+	//ImGui_ImplX11_ShowWindow(viewport);
+}
+
+static void ImGui_ImplX11_DestroyWindow(ImGuiViewport* viewport) {
+    ImGui_ImplX11_Data* bd = ImGui_ImplX11_GetBackendData();
+    if (ImGui_ImplX11_ViewportData* vd = (ImGui_ImplX11_ViewportData*)viewport->PlatformUserData) {
+        if (vd->window && vd->owned) {
+			XDestroyWindow(bd->display, vd->window);
+		}
+        vd->window = 0;
+
+        IM_DELETE(vd);
+    }
+    viewport->PlatformUserData = viewport->PlatformHandle = nullptr;
+}
+
+static void ImGui_ImplX11_ShowWindow(ImGuiViewport *viewport) {
+	ImGui_ImplX11_ViewportData *vd = (ImGui_ImplX11_ViewportData *)viewport->PlatformUserData;
+	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
+
+	IM_ASSERT(vd->window != 0);
+	if (viewport->Flags & ImGuiViewportFlags_NoFocusOnAppearing) {
+		XMapRaised(bd->display, vd->window);
+	} else {
+		XMapWindow(bd->display, vd->window);
+	}
+	XFlush(bd->display);
+}
+
+static void ImGui_ImplX11_UpdateWindow(ImGuiViewport* viewport) {
+	ImGui_ImplX11_ViewportData *vd = (ImGui_ImplX11_ViewportData*)viewport->PlatformUserData;
+	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
+	IM_ASSERT(vd->window != 0);
+
+	// qrikko:
+	// this should be something else.. either parent or perhaps even root?
+	// but then we have to figure out coordinates relative root!
+
+	Window root = XDefaultRootWindow(bd->display);
+	//if(root != vd->parent) {
+	/*
+	if(vd->owned && vd->parent != root) {
+		int root_x, root_y;
+	//	vd->parent = root;
+	//	XTranslateCoordinates(bd->display, vd->window, root, 0, 0, &root_x, &root_y, &child);
+		XReparentWindow(bd->display, vd->window, root, 0, 0);
+		vd->parent = root;
+
+//		XMoveWindow(bd->display, vd->window, root_x, root_y);
+		XFlush(bd->display);
+	}
+*/
+}
+
+static ImVec2 ImGui_ImplX11_GetWindowPos(ImGuiViewport *viewport) {
+/*
+	ImGui_ImplX11_ViewportData *vd = (ImGui_ImplX11_ViewportData *)viewport->PlatformUserData;
+	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
+	IM_ASSERT(vd->window != 0);
+    Window root;
+    int x, y;
+    unsigned int width, height, border_width, depth;
+    XGetGeometry(bd->display, vd->window, &root, &x, &y, &width, &height, &border_width, &depth);
+
+    // Convert window coordinates to screen coordinates
+    Window child;
+	int tx, ty;
+    XTranslateCoordinates(bd->display, vd->window, root, 0, 0, &tx, &ty, &child);
+*/
+    return ImVec2((float)0, (float)0);
+}
+
+static void ImGui_ImplX11_SetWindowPos(ImGuiViewport *viewport, ImVec2 pos) {
+	ImGui_ImplX11_ViewportData *vd = (ImGui_ImplX11_ViewportData *)viewport->PlatformUserData;
+	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
+
+	XWindowAttributes attr;
+	XGetWindowAttributes(bd->display, vd->parent, &attr);
+
+	IM_ASSERT(vd->window != 0);
+	Window root = XDefaultRootWindow(bd->display);
+	Window child;
+
+	int root_x, root_y;
+	int x = pos.x, y=pos.y;
+	if (XTranslateCoordinates(bd->display, vd->parent, root, pos.x, pos.y, &root_x, &root_y, &child)) {
+		XMoveWindow(bd->display, vd->window, root_x, root_y);
+		//XReparentWindow(bd->display, vd->window, root, 0, 0);
+	}
+
+}
+
+static ImVec2 ImGui_ImplX11_GetWindowSize(ImGuiViewport* viewport) {
+    ImGui_ImplX11_ViewportData* vd = (ImGui_ImplX11_ViewportData*)viewport->PlatformUserData;
+	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
+
+	IM_ASSERT(vd->window != 0);
+    Window root;
+	int x, y;
+	unsigned int width, height, border_width, depth;
+    XGetGeometry(bd->display, vd->window, &root, &x, &y, &width, &height, &border_width, &depth);
+
+	return ImVec2((float)width, (float)height);
+}
+
+static void ImGui_ImplX11_SetWindowSize(ImGuiViewport* viewport, ImVec2 size) {
+    ImGui_ImplX11_ViewportData* vd = (ImGui_ImplX11_ViewportData*)viewport->PlatformUserData;
+	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
+	IM_ASSERT(vd->window != 0);
+	XResizeWindow(bd->display, vd->window, size.x, size.y);
+}
+
+static void ImGui_ImplX11_SetWindowFocus(ImGuiViewport *viewport) {
+	ImGui_ImplX11_ViewportData *vd = (ImGui_ImplX11_ViewportData*)viewport->PlatformUserData;
+	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
+
+	IM_ASSERT(vd->window != 0);
+	Time now = Time();
+	XSetInputFocus(bd->display, vd->window, true, now);
+	XGrabPointer(bd->display, vd->window, false, 0, GrabModeAsync, GrabModeAsync, None, None, now);
+}
+
+static bool ImGui_ImplX11_GetWindowFocus(ImGuiViewport* viewport) {
+	ImGui_ImplX11_ViewportData *vd = (ImGui_ImplX11_ViewportData*)viewport->PlatformUserData;
+	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
+	IM_ASSERT(vd->window != 0);
+	int revert_to;
+	Window focused;
+	XGetInputFocus(bd->display, &focused, &revert_to);
+	return focused == vd->window;
+}
+
+static void ImGui_ImplX11_SetWindowTitle(ImGuiViewport* viewport, const char *title) {
+	ImGui_ImplX11_ViewportData *vd = (ImGui_ImplX11_ViewportData*)viewport->PlatformUserData;
+	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
+
+	IM_ASSERT(vd->window != 0);
+
+    XStoreName(bd->display, vd->window, title);
+}
+
+static void ImGui_ImplX11_SetWindowAlpha(ImGuiViewport* viewport, float alpha) {
+	ImGui_ImplX11_ViewportData *vd = (ImGui_ImplX11_ViewportData*)viewport->PlatformUserData;
+	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
+
+	IM_ASSERT(vd->window != 0);
+    IM_ASSERT(alpha >= 0.0f && alpha <= 1.0f);
+
+	long opacity = (long)0xFFFFFFFF * (double)alpha;
+	XChangeProperty(
+		bd->display,
+		vd->window,
+		XInternAtom(bd->display, "_NET_WM_WINDOW_OPACITY", False),
+		XA_CARDINAL,
+		32,
+		PropModeReplace,
+		(unsigned char *)&opacity,
+		1
+	);
+}
+
+static bool ImGui_ImplX11_GetWindowMinimized(ImGuiViewport* viewport) {
+	ImGui_ImplX11_ViewportData *vd = (ImGui_ImplX11_ViewportData*)viewport->PlatformUserData;
+	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
+
+	IM_ASSERT(vd->window != 0);
+
+	Atom wm_state_atom = XInternAtom(bd->display, "_NET_WM_STATE", False);
+	Atom wm_state_minimized_atom = XInternAtom(bd->display, "_NET_WM_STATE_MINIMIZED", False);
+
+	Atom actual_type;
+	int actual_format;
+	unsigned long num_items, bytes_after;
+	unsigned char *prop;
+
+	if (XGetWindowProperty(
+		bd->display,
+		vd->window,
+		wm_state_atom,
+		0,
+		1024,
+		False,
+		AnyPropertyType,
+		&actual_type,
+		&actual_format,
+		&num_items,
+		&bytes_after, &prop
+	) != Success) {
+        return 0;  // Failed to get property
+    }
+
+    if (actual_type == XA_ATOM) {
+        // Check if the _NET_WM_STATE_MINIMIZED is among the window states
+        for (unsigned long i = 0; i < num_items; ++i) {
+            if (((Atom*)prop)[i] == wm_state_minimized_atom) {
+                XFree(prop);
+                return 1;  // Window is minimized
+            }
+        }
+    }
+
+    XFree(prop);
+    return 0;  // Window is not minimized
+
+
+}
+
+static void ImGui_ImplX11_OnChangedViewport(ImGuiViewport* viewport) {
+    (void)viewport;
+#if 0
+    ImGuiStyle default_style;
+    //default_style.WindowPadding = ImVec2(0, 0);
+    //default_style.WindowBorderSize = 0.0f;
+    //default_style.ItemSpacing.y = 3.0f;
+    //default_style.FramePadding = ImVec2(0, 0);
+    default_style.ScaleAllSizes(viewport->DpiScale);
+    ImGuiStyle& style = ImGui::GetStyle();
+    style = default_style;
+#endif
+}
+
+/*
+float ImGui_ImplX11_GetDpiScaleForWindow(X11_Window* window) {
+	XRRScreenConfiguration *config = XRRGetScreenInfo(window->dpy, window->win);
+	Rotation rotation;
+	int current_size_id = XRRConfigCurrentConfiguration(config, &rotation);
+
+	//XRRScreenSize *current_size = config
+
+}
+
+static float ImGui_ImplX11_GetWindowDpiScale(ImGuiViewport* viewport)
+{
+    ImGui_ImplX11_ViewportData* vd = (ImGui_ImplX11_ViewportData*)viewport->PlatformUserData;
+    IM_ASSERT(vd->window != 0);
+    return ImGui_ImplX11_GetDpiScaleForWindow(&vd->window);
+}
+*/
+
+static void ImGui_ImplX11_InitPlatformInterface() {
+    // Register platform interface (will be coupled with a renderer interface)
+    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+    platform_io.Platform_CreateWindow = ImGui_ImplX11_CreateWindow;
+    platform_io.Platform_DestroyWindow = ImGui_ImplX11_DestroyWindow;
+    platform_io.Platform_ShowWindow = ImGui_ImplX11_ShowWindow;
+    platform_io.Platform_SetWindowPos = ImGui_ImplX11_SetWindowPos;
+    platform_io.Platform_GetWindowPos = ImGui_ImplX11_GetWindowPos;
+    platform_io.Platform_SetWindowSize = ImGui_ImplX11_SetWindowSize;
+    platform_io.Platform_GetWindowSize = ImGui_ImplX11_GetWindowSize;
+    platform_io.Platform_SetWindowFocus = ImGui_ImplX11_SetWindowFocus;
+    platform_io.Platform_GetWindowFocus = ImGui_ImplX11_GetWindowFocus;
+    platform_io.Platform_GetWindowMinimized = ImGui_ImplX11_GetWindowMinimized;
+    platform_io.Platform_SetWindowTitle = ImGui_ImplX11_SetWindowTitle;
+    platform_io.Platform_SetWindowAlpha = ImGui_ImplX11_SetWindowAlpha;
+    platform_io.Platform_UpdateWindow = ImGui_ImplX11_UpdateWindow;
+    //platform_io.Platform_GetWindowDpiScale = ImGui_ImplX11_GetWindowDpiScale; // FIXME-DPI
+    // perhaps somewhat a work-around for now...
+
+    platform_io.Platform_OnChangedViewport = ImGui_ImplX11_OnChangedViewport; // FIXME-DPI
+
+    // Register main window handle (which is owned by the main application, not by us)
+    // This is mostly for simplicity and consistency, so that our code (e.g. mouse handling etc.) can use same logic for main and secondary viewports.
+    ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+    ImGui_ImplX11_Data* bd = ImGui_ImplX11_GetBackendData();
+    ImGui_ImplX11_ViewportData* vd = IM_NEW(ImGui_ImplX11_ViewportData)();
+    vd->window = bd->window;
+	vd->display = bd->display;
+	vd->parent = XDefaultRootWindow(bd->display);
+    vd->owned = false;
+    main_viewport->PlatformUserData = vd;
+    main_viewport->PlatformHandle = (void*)&bd->window;
+
+	ImGuiPlatformMonitor m;
+	m.PlatformHandle = (void*)&bd->window;
+	m.DpiScale = 1.0f;
+	m.MainPos = ImGui_ImplX11_GetWindowPos(main_viewport);
+	m.MainSize = ImGui_ImplX11_GetWindowSize(main_viewport);
+	m.WorkPos = m.MainPos;
+	m.WorkSize = m.MainSize;
+
+	platform_io.Monitors.push_back(m);
+}
+
 
 #endif

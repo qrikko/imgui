@@ -31,8 +31,11 @@ project "imgui"
 		"imstb_textedit.h",
 		"imstb_truetype.h",
 		"imgui_demo.cpp",
+
 		"./backends/imgui_impl_vulkan.cpp",
-		"./backends/imgui_impl_x11.cpp"
+		"./backends/imgui_impl_x11.cpp",
+        "./backends/imgui_impl_opengl3.cpp",
+        "./backends/imgui_impl_glfw.cpp",
 	}
 
 	filter "configurations:Debug"
