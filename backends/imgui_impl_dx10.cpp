@@ -4,6 +4,7 @@
 // Implemented features:
 //  [X] Renderer: User texture binding. Use 'ID3D10ShaderResourceView*' as ImTextureID. Read the FAQ about ImTextureID!
 //  [X] Renderer: Large meshes support (64k+ vertices) even with 16-bit indices (ImGuiBackendFlags_RendererHasVtxOffset).
+//  [X] Renderer: Multi-viewport support (multiple windows). Enable with 'io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable'.
 
 // You can use unmodified imgui_impl_* files in your project. See examples/ folder for examples of using this.
 // Prefer including the entire imgui/ repository into your project (either as a copy or as a submodule), and only build the backends you need.
@@ -15,6 +16,7 @@
 
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
+//  2025-XX-XX: Platform: Added support for multiple windows via the ImGuiPlatformIO interface.
 //  2025-01-06: DirectX10: Expose selected render state in ImGui_ImplDX10_RenderState, which you can access in 'void* platform_io.Renderer_RenderState' during draw callbacks.
 //  2024-10-07: DirectX10: Changed default texture sampler to Clamp instead of Repeat/Wrap.
 //  2022-10-11: Using 'nullptr' instead of 'NULL' as per our switch to C++11.
@@ -82,8 +84,8 @@ static ImGui_ImplDX10_Data* ImGui_ImplDX10_GetBackendData()
 }
 
 // Forward Declarations
-static void ImGui_ImplDX10_InitPlatformInterface();
-static void ImGui_ImplDX10_ShutdownPlatformInterface();
+static void ImGui_ImplDX10_InitMultiViewportSupport();
+static void ImGui_ImplDX10_ShutdownMultiViewportSupport();
 
 // Functions
 static void ImGui_ImplDX10_SetupRenderState(ImDrawData* draw_data, ID3D10Device* device)
@@ -581,8 +583,8 @@ bool    ImGui_ImplDX10_Init(ID3D10Device* device)
     if (pDXGIAdapter) pDXGIAdapter->Release();
     bd->pd3dDevice->AddRef();
 
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-        ImGui_ImplDX10_InitPlatformInterface();
+    ImGui_ImplDX10_InitMultiViewportSupport();
+
     return true;
 }
 
@@ -592,7 +594,7 @@ void ImGui_ImplDX10_Shutdown()
     IM_ASSERT(bd != nullptr && "No renderer backend to shutdown, or already shutdown?");
     ImGuiIO& io = ImGui::GetIO();
 
-    ImGui_ImplDX10_ShutdownPlatformInterface();
+    ImGui_ImplDX10_ShutdownMultiViewportSupport();
     ImGui_ImplDX10_InvalidateDeviceObjects();
     if (bd->pFactory) { bd->pFactory->Release(); }
     if (bd->pd3dDevice) { bd->pd3dDevice->Release(); }
@@ -633,7 +635,7 @@ static void ImGui_ImplDX10_CreateWindow(ImGuiViewport* viewport)
     ImGui_ImplDX10_ViewportData* vd = IM_NEW(ImGui_ImplDX10_ViewportData)();
     viewport->RendererUserData = vd;
 
-    // PlatformHandleRaw should always be a HWND, whereas PlatformHandle might be a higher-level handle (e.g. GLFWWindow*, SDL_Window*).
+    // PlatformHandleRaw should always be a HWND, whereas PlatformHandle might be a higher-level handle (e.g. GLFWWindow*, SDL's WindowID).
     // Some backends will leave PlatformHandleRaw == 0, in which case we assume PlatformHandle will contain the HWND.
     HWND hwnd = viewport->PlatformHandleRaw ? (HWND)viewport->PlatformHandleRaw : (HWND)viewport->PlatformHandle;
     IM_ASSERT(hwnd != 0);
@@ -719,7 +721,7 @@ static void ImGui_ImplDX10_SwapBuffers(ImGuiViewport* viewport, void*)
     vd->SwapChain->Present(0, 0); // Present without vsync
 }
 
-void ImGui_ImplDX10_InitPlatformInterface()
+void ImGui_ImplDX10_InitMultiViewportSupport()
 {
     ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
     platform_io.Renderer_CreateWindow = ImGui_ImplDX10_CreateWindow;
@@ -729,7 +731,7 @@ void ImGui_ImplDX10_InitPlatformInterface()
     platform_io.Renderer_SwapBuffers = ImGui_ImplDX10_SwapBuffers;
 }
 
-void ImGui_ImplDX10_ShutdownPlatformInterface()
+void ImGui_ImplDX10_ShutdownMultiViewportSupport()
 {
     ImGui::DestroyPlatformWindows();
 }

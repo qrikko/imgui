@@ -10,8 +10,11 @@
 //  [X] Platform: Gamepad support.
 //  [X] Platform: Mouse cursor shape and visibility (ImGuiBackendFlags_HasMouseCursors). Disable with 'io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange'.
 //  [X] Platform: IME support.
+//  [x] Platform: Multi-viewport / platform windows.
 // Missing features or Issues:
 //  [ ] Missing ImGuiMouseCursor_Wait and ImGuiMouseCursor_Progress cursors.
+//  [ ] Multi-viewport: Window size not correctly reported when enabling io.ConfigViewportsNoDecoration
+//  [ ] Multi-viewport: ParentViewportID not honored, and so io.ConfigViewportsNoDefaultParent has no effect (minor).
 
 // You can use unmodified imgui_impl_* files in your project. See examples/ folder for examples of using this.
 // Prefer including the entire imgui/ repository into your project (either as a copy or as a submodule), and only build the backends you need.
@@ -31,6 +34,7 @@
 
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
+//  2025-XX-XX: Added support for multiple windows via the ImGuiPlatformIO interface.
 //  2025-03-21: Fill gamepad inputs and set ImGuiBackendFlags_HasGamepad regardless of ImGuiConfigFlags_NavEnableGamepad being set.
 //  2025-01-20: Removed notification observer when shutting down. (#8331)
 //  2024-08-22: moved some OS/backend related function pointers from ImGuiIO to ImGuiPlatformIO:
@@ -100,8 +104,8 @@ static void                     ImGui_ImplOSX_DestroyBackendData()  { IM_DELETE(
 static inline CFTimeInterval    GetMachAbsoluteTimeInSeconds()      { return (CFTimeInterval)(double)(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9); }
 
 // Forward Declarations
-static void ImGui_ImplOSX_InitPlatformInterface();
-static void ImGui_ImplOSX_ShutdownPlatformInterface();
+static void ImGui_ImplOSX_InitMultiViewportSupport();
+static void ImGui_ImplOSX_ShutdownMultiViewportSupport();
 static void ImGui_ImplOSX_UpdateMonitors();
 static void ImGui_ImplOSX_AddTrackingArea(NSView* _Nonnull view);
 static bool ImGui_ImplOSX_HandleEvent(NSEvent* event, NSView* view);
@@ -446,6 +450,8 @@ bool ImGui_ImplOSX_Init(NSView* view)
     bd->Window = view.window ?: NSApp.orderedWindows.firstObject;
     ImGuiViewport* main_viewport = ImGui::GetMainViewport();
     main_viewport->PlatformHandle = main_viewport->PlatformHandleRaw = (__bridge_retained void*)bd->Window;
+    ImGui_ImplOSX_UpdateMonitors();
+    ImGui_ImplOSX_InitMultiViewportSupport();
 
     // Load cursors. Some of them are undocumented.
     bd->MouseCursorHidden = false;
@@ -536,7 +542,7 @@ void ImGui_ImplOSX_Shutdown()
         bd->Monitor = nullptr;
     }
 
-    ImGui_ImplOSX_ShutdownPlatformInterface();
+    ImGui_ImplOSX_ShutdownMultiViewportSupport();
     ImGui_ImplOSX_DestroyBackendData();
     ImGuiIO& io = ImGui::GetIO();
     io.BackendPlatformName = nullptr;
@@ -920,7 +926,7 @@ static void ImGui_ImplOSX_CreateWindow(ImGuiViewport* viewport)
     window.opaque = YES;
 
     KeyEventResponder* view = [[KeyEventResponder alloc] initWithFrame:rect];
-    if (floor(NSAppKitVersionNumber) > NSAppKitVersionNumber10_6)
+    if (floor(NSAppKitVersionNumber) > NSAppKitVersionNumber10_6 && ceil(NSAppKitVersionNumber) < NSAppKitVersionNumber10_15)
         [view setWantsBestResolutionOpenGLSurface:YES];
 
     window.contentView = view;
@@ -1091,7 +1097,7 @@ static void ImGui_ImplOSX_UpdateMonitors()
     }
 }
 
-static void ImGui_ImplOSX_InitPlatformInterface()
+static void ImGui_ImplOSX_InitMultiViewportSupport()
 {
     ImGui_ImplOSX_Data* bd = ImGui_ImplOSX_GetBackendData();
 
@@ -1125,7 +1131,7 @@ static void ImGui_ImplOSX_InitPlatformInterface()
                                              object:nil];
 }
 
-static void ImGui_ImplOSX_ShutdownPlatformInterface()
+static void ImGui_ImplOSX_ShutdownMultiViewportSupport()
 {
     ImGui_ImplOSX_Data* bd = ImGui_ImplOSX_GetBackendData();
     [NSNotificationCenter.defaultCenter removeObserver:bd->Observer

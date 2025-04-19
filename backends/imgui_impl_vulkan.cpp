@@ -5,6 +5,7 @@
 //  [!] Renderer: User texture binding. Use 'VkDescriptorSet' as ImTextureID. Call ImGui_ImplVulkan_AddTexture() to register one. Read the FAQ about ImTextureID! See https://github.com/ocornut/imgui/pull/914 for discussions.
 //  [X] Renderer: Large meshes support (64k+ vertices) even with 16-bit indices (ImGuiBackendFlags_RendererHasVtxOffset).
 //  [X] Renderer: Expose selected render state for draw callbacks to use. Access in '(ImGui_ImplXXXX_RenderState*)GetPlatformIO().Renderer_RenderState'.
+//  [x] Renderer: Multi-viewport / platform windows. With issues (flickering when creating a new viewport).
 
 // The aim of imgui_impl_vulkan.h/.cpp is to be usable in your engine without any modification.
 // IF YOU FEEL YOU NEED TO MAKE ANY CHANGE TO THIS CODE, please share them and your feedback at https://github.com/ocornut/imgui/
@@ -26,6 +27,7 @@
 
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
+//  2025-XX-XX: Platform: Added support for multiple windows via the ImGuiPlatformIO interface.
 //  2025-04-07: Vulkan: Deep-copy ImGui_ImplVulkan_InitInfo::PipelineRenderingCreateInfo's pColorAttachmentFormats buffer when set, in order to reduce common user-error of specifying a pointer to data that gets out of scope. (#8282)
 //  2025-02-14: *BREAKING CHANGE*: Added uint32_t api_version to ImGui_ImplVulkan_LoadFunctions().
 //  2025-02-13: Vulkan: Added ApiVersion field in ImGui_ImplVulkan_InitInfo. Default to header version if unspecified. Dynamic rendering path loads "vkCmdBeginRendering/vkCmdEndRendering" (without -KHR suffix) on API 1.3. (#8326)
@@ -248,9 +250,10 @@ struct ImGui_ImplVulkan_ViewportData
     ImGui_ImplVulkan_WindowRenderBuffers    RenderBuffers;          // Used by all viewports
     bool                                    WindowOwned;
     bool                                    SwapChainNeedRebuild;   // Flag when viewport swapchain resized in the middle of processing a frame
+    bool                                    SwapChainSuboptimal;    // Flag when VK_SUBOPTIMAL_KHR was returned.
 
-    ImGui_ImplVulkan_ViewportData()         { WindowOwned = SwapChainNeedRebuild = false; memset(&RenderBuffers, 0, sizeof(RenderBuffers)); }
-    ~ImGui_ImplVulkan_ViewportData()        { }
+    ImGui_ImplVulkan_ViewportData() { WindowOwned = SwapChainNeedRebuild = SwapChainSuboptimal = false; memset((void*)&RenderBuffers, 0, sizeof(RenderBuffers)); }
+    ~ImGui_ImplVulkan_ViewportData() { }
 };
 
 // Vulkan data
@@ -288,8 +291,8 @@ struct ImGui_ImplVulkan_Data
 //-----------------------------------------------------------------------------
 
 // Forward Declarations
-static void ImGui_ImplVulkan_InitPlatformInterface();
-static void ImGui_ImplVulkan_ShutdownPlatformInterface();
+static void ImGui_ImplVulkan_InitMultiViewportSupport();
+static void ImGui_ImplVulkan_ShutdownMultiViewportSupport();
 
 // backends/vulkan/glsl_shader.vert, compiled with:
 // # glslangValidator -V -x -o glsl_shader.vert.u32 glsl_shader.vert
@@ -528,8 +531,10 @@ void ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer comm
     if (pipeline == VK_NULL_HANDLE)
         pipeline = bd->Pipeline;
 
-    // Allocate array to store enough vertex/index buffers
-    ImGui_ImplVulkan_WindowRenderBuffers* wrb = &bd->MainWindowRenderBuffers;
+    // Allocate array to store enough vertex/index buffers. Each unique viewport gets its own storage.
+    ImGui_ImplVulkan_ViewportData* viewport_renderer_data = (ImGui_ImplVulkan_ViewportData*)draw_data->OwnerViewport->RendererUserData;
+    IM_ASSERT(viewport_renderer_data != nullptr);
+    ImGui_ImplVulkan_WindowRenderBuffers* wrb = &viewport_renderer_data->RenderBuffers;
     if (wrb->FrameRenderBuffers.Size == 0)
     {
         wrb->Index = 0;
@@ -1105,6 +1110,7 @@ void    ImGui_ImplVulkan_DestroyDeviceObjects()
     if (bd->DescriptorSetLayout)  { vkDestroyDescriptorSetLayout(v->Device, bd->DescriptorSetLayout, v->Allocator); bd->DescriptorSetLayout = VK_NULL_HANDLE; }
     if (bd->PipelineLayout)       { vkDestroyPipelineLayout(v->Device, bd->PipelineLayout, v->Allocator); bd->PipelineLayout = VK_NULL_HANDLE; }
     if (bd->Pipeline)             { vkDestroyPipeline(v->Device, bd->Pipeline, v->Allocator); bd->Pipeline = VK_NULL_HANDLE; }
+    if (bd->PipelineForViewports) { vkDestroyPipeline(v->Device, bd->PipelineForViewports, v->Allocator); bd->PipelineForViewports = VK_NULL_HANDLE; }
     if (bd->DescriptorPool)       { vkDestroyDescriptorPool(v->Device, bd->DescriptorPool, v->Allocator); bd->DescriptorPool = VK_NULL_HANDLE; }
 }
 
@@ -1219,8 +1225,7 @@ bool    ImGui_ImplVulkan_Init(ImGui_ImplVulkan_InitInfo* info)
     ImGuiViewport* main_viewport = ImGui::GetMainViewport();
     main_viewport->RendererUserData = IM_NEW(ImGui_ImplVulkan_ViewportData)();
 
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-        ImGui_ImplVulkan_InitPlatformInterface();
+    ImGui_ImplVulkan_InitMultiViewportSupport();
 
     return true;
 }
@@ -1236,6 +1241,15 @@ void ImGui_ImplVulkan_Shutdown()
 #ifdef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
     IM_FREE((void*)bd->VulkanInitInfo.PipelineRenderingCreateInfo.pColorAttachmentFormats);
 #endif
+
+    // Manually delete main viewport render data in-case we haven't initialized for viewports
+    ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+    if (ImGui_ImplVulkan_ViewportData* vd = (ImGui_ImplVulkan_ViewportData*)main_viewport->RendererUserData)
+        IM_DELETE(vd);
+    main_viewport->RendererUserData = nullptr;
+
+    // Clean up windows
+    ImGui_ImplVulkan_ShutdownMultiViewportSupport();
 
     io.BackendRendererName = nullptr;
     io.BackendRendererUserData = nullptr;
@@ -1707,7 +1721,6 @@ void ImGui_ImplVulkanH_DestroyWindow(VkInstance instance, VkDevice device, ImGui
         ImGui_ImplVulkanH_DestroyFrameSemaphores(device, &wd->FrameSemaphores[i], allocator);
     wd->Frames.clear();
     wd->FrameSemaphores.clear();
-    vkDestroyPipeline(device, wd->Pipeline, allocator);
     vkDestroyRenderPass(device, wd->RenderPass, allocator);
     vkDestroySwapchainKHR(device, wd->Swapchain, allocator);
     vkDestroySurfaceKHR(instance, wd->Surface, allocator);
@@ -1835,24 +1848,26 @@ static void ImGui_ImplVulkan_RenderWindow(ImGuiViewport* viewport, void*)
     ImGui_ImplVulkan_InitInfo* v = &bd->VulkanInitInfo;
     VkResult err;
 
-    if (vd->SwapChainNeedRebuild)
+    if (vd->SwapChainNeedRebuild || vd->SwapChainSuboptimal)
     {
         ImGui_ImplVulkanH_CreateOrResizeWindow(v->Instance, v->PhysicalDevice, v->Device, wd, v->QueueFamily, v->Allocator, (int)viewport->Size.x, (int)viewport->Size.y, v->MinImageCount);
-        vd->SwapChainNeedRebuild = false;
+        vd->SwapChainNeedRebuild = vd->SwapChainSuboptimal = false;
     }
 
-    ImGui_ImplVulkanH_Frame* fd = &wd->Frames[wd->FrameIndex];
+    ImGui_ImplVulkanH_Frame* fd = nullptr;
     ImGui_ImplVulkanH_FrameSemaphores* fsd = &wd->FrameSemaphores[wd->SemaphoreIndex];
     {
         {
             err = vkAcquireNextImageKHR(v->Device, wd->Swapchain, UINT64_MAX, fsd->ImageAcquiredSemaphore, VK_NULL_HANDLE, &wd->FrameIndex);
             if (err == VK_ERROR_OUT_OF_DATE_KHR)
             {
-                // Since we are not going to swap this frame anyway, it's ok that recreation happens on next frame.
-                vd->SwapChainNeedRebuild = true;
+                vd->SwapChainNeedRebuild = true; // Since we are not going to swap this frame anyway, it's ok that recreation happens on next frame.
                 return;
             }
-            check_vk_result(err);
+            if (err == VK_SUBOPTIMAL_KHR)
+                vd->SwapChainSuboptimal = true;
+            else
+                check_vk_result(err);
             fd = &wd->Frames[wd->FrameIndex];
         }
         for (;;)
@@ -1994,18 +2009,19 @@ static void ImGui_ImplVulkan_SwapBuffers(ImGuiViewport* viewport, void*)
     info.pSwapchains = &wd->Swapchain;
     info.pImageIndices = &present_index;
     err = vkQueuePresentKHR(v->Queue, &info);
-    if (err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_SUBOPTIMAL_KHR)
+    if (err == VK_ERROR_OUT_OF_DATE_KHR)
     {
         vd->SwapChainNeedRebuild = true;
         return;
     }
-    check_vk_result(err);
-
-    wd->FrameIndex = (wd->FrameIndex + 1) % wd->ImageCount;             // This is for the next vkWaitForFences()
+    if (err == VK_SUBOPTIMAL_KHR)
+        vd->SwapChainSuboptimal = true;
+    else
+        check_vk_result(err);
     wd->SemaphoreIndex = (wd->SemaphoreIndex + 1) % wd->SemaphoreCount; // Now we can use the next set of semaphores
 }
 
-void ImGui_ImplVulkan_InitPlatformInterface()
+void ImGui_ImplVulkan_InitMultiViewportSupport()
 {
     ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
     if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
@@ -2017,7 +2033,7 @@ void ImGui_ImplVulkan_InitPlatformInterface()
     platform_io.Renderer_SwapBuffers = ImGui_ImplVulkan_SwapBuffers;
 }
 
-void ImGui_ImplVulkan_ShutdownPlatformInterface()
+void ImGui_ImplVulkan_ShutdownMultiViewportSupport()
 {
     ImGui::DestroyPlatformWindows();
 }

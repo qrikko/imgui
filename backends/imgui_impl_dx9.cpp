@@ -5,6 +5,7 @@
 //  [X] Renderer: User texture binding. Use 'LPDIRECT3DTEXTURE9' as ImTextureID. Read the FAQ about ImTextureID!
 //  [X] Renderer: Large meshes support (64k+ vertices) even with 16-bit indices (ImGuiBackendFlags_RendererHasVtxOffset).
 //  [X] Renderer: IMGUI_USE_BGRA_PACKED_COLOR support, as this is the optimal color encoding for DirectX9.
+//  [X] Renderer: Multi-viewport support (multiple windows). Enable with 'io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable'.
 
 // You can use unmodified imgui_impl_* files in your project. See examples/ folder for examples of using this.
 // Prefer including the entire imgui/ repository into your project (either as a copy or as a submodule), and only build the backends you need.
@@ -16,6 +17,7 @@
 
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
+//  2025-XX-XX: Platform: Added support for multiple windows via the ImGuiPlatformIO interface.
 //  2024-10-07: DirectX9: Changed default texture sampler to Clamp instead of Repeat/Wrap.
 //  2024-02-12: DirectX9: Using RGBA format when supported by the driver to avoid CPU side conversion. (#6575)
 //  2022-10-11: Using 'nullptr' instead of 'NULL' as per our switch to C++11.
@@ -80,8 +82,8 @@ static ImGui_ImplDX9_Data* ImGui_ImplDX9_GetBackendData()
 }
 
 // Forward Declarations
-static void ImGui_ImplDX9_InitPlatformInterface();
-static void ImGui_ImplDX9_ShutdownPlatformInterface();
+static void ImGui_ImplDX9_InitMultiViewportSupport();
+static void ImGui_ImplDX9_ShutdownMultiViewportSupport();
 static void ImGui_ImplDX9_CreateDeviceObjectsForPlatformWindows();
 static void ImGui_ImplDX9_InvalidateDeviceObjectsForPlatformWindows();
 
@@ -339,8 +341,7 @@ bool ImGui_ImplDX9_Init(IDirect3DDevice9* device)
     bd->pd3dDevice->AddRef();
     bd->HasRgbaSupport = ImGui_ImplDX9_CheckFormatSupport(bd->pd3dDevice, D3DFMT_A8B8G8R8);
 
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-        ImGui_ImplDX9_InitPlatformInterface();
+    ImGui_ImplDX9_InitMultiViewportSupport();
 
     return true;
 }
@@ -351,7 +352,7 @@ void ImGui_ImplDX9_Shutdown()
     IM_ASSERT(bd != nullptr && "No renderer backend to shutdown, or already shutdown?");
     ImGuiIO& io = ImGui::GetIO();
 
-    ImGui_ImplDX9_ShutdownPlatformInterface();
+    ImGui_ImplDX9_ShutdownMultiViewportSupport();
     ImGui_ImplDX9_InvalidateDeviceObjects();
     if (bd->pd3dDevice) { bd->pd3dDevice->Release(); }
     io.BackendRendererName = nullptr;
@@ -459,7 +460,7 @@ static void ImGui_ImplDX9_CreateWindow(ImGuiViewport* viewport)
     ImGui_ImplDX9_ViewportData* vd = IM_NEW(ImGui_ImplDX9_ViewportData)();
     viewport->RendererUserData = vd;
 
-    // PlatformHandleRaw should always be a HWND, whereas PlatformHandle might be a higher-level handle (e.g. GLFWWindow*, SDL_Window*).
+    // PlatformHandleRaw should always be a HWND, whereas PlatformHandle might be a higher-level handle (e.g. GLFWWindow*, SDL's WindowID).
     // Some backends will leave PlatformHandleRaw == 0, in which case we assume PlatformHandle will contain the HWND.
     HWND hwnd = viewport->PlatformHandleRaw ? (HWND)viewport->PlatformHandleRaw : (HWND)viewport->PlatformHandle;
     IM_ASSERT(hwnd != 0);
@@ -548,7 +549,7 @@ static void ImGui_ImplDX9_SwapBuffers(ImGuiViewport* viewport, void*)
     IM_ASSERT(SUCCEEDED(hr) || hr == D3DERR_DEVICELOST);
 }
 
-static void ImGui_ImplDX9_InitPlatformInterface()
+static void ImGui_ImplDX9_InitMultiViewportSupport()
 {
     ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
     platform_io.Renderer_CreateWindow = ImGui_ImplDX9_CreateWindow;
@@ -558,7 +559,7 @@ static void ImGui_ImplDX9_InitPlatformInterface()
     platform_io.Renderer_SwapBuffers = ImGui_ImplDX9_SwapBuffers;
 }
 
-static void ImGui_ImplDX9_ShutdownPlatformInterface()
+static void ImGui_ImplDX9_ShutdownMultiViewportSupport()
 {
     ImGui::DestroyPlatformWindows();
 }

@@ -4,6 +4,7 @@
 // Implemented features:
 //  [X] Renderer: User texture binding. Use 'MTLTexture' as ImTextureID. Read the FAQ about ImTextureID!
 //  [X] Renderer: Large meshes support (64k+ vertices) even with 16-bit indices (ImGuiBackendFlags_RendererHasVtxOffset).
+//  [X] Renderer: Multi-viewport support (multiple windows). Enable with 'io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable'.
 
 // You can use unmodified imgui_impl_* files in your project. See examples/ folder for examples of using this.
 // Prefer including the entire imgui/ repository into your project (either as a copy or as a submodule), and only build the backends you need.
@@ -17,6 +18,9 @@
 // (minor and older changes stripped away, please see git history for details)
 //  2025-02-03: Metal: Crash fix. (#8367)
 //  2024-01-08: Metal: Fixed memory leaks when using metal-cpp (#8276, #8166) or when using multiple contexts (#7419).
+//  2025-XX-XX: Metal: Added support for multiple windows via the ImGuiPlatformIO interface.
+//  2025-02-03: Metal: Crash fix. (#8367)
+//  2025-01-08: Metal: Fixed memory leaks when using metal-cpp (#8276, #8166) or when using multiple contexts (#7419).
 //  2022-08-23: Metal: Update deprecated property 'sampleCount'->'rasterSampleCount'.
 //  2022-07-05: Metal: Add dispatch synchronization.
 //  2022-06-30: Metal: Use __bridge for ARC based systems.
@@ -41,8 +45,8 @@
 #import <Metal/Metal.h>
 
 // Forward Declarations
-static void ImGui_ImplMetal_InitPlatformInterface();
-static void ImGui_ImplMetal_ShutdownPlatformInterface();
+static void ImGui_ImplMetal_InitMultiViewportSupport();
+static void ImGui_ImplMetal_ShutdownMultiViewportSupport();
 static void ImGui_ImplMetal_CreateDeviceObjectsForPlatformWindows();
 static void ImGui_ImplMetal_InvalidateDeviceObjectsForPlatformWindows();
 
@@ -145,8 +149,7 @@ bool ImGui_ImplMetal_Init(id<MTLDevice> device)
     bd->SharedMetalContext = [[MetalContext alloc] init];
     bd->SharedMetalContext.device = device;
 
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-        ImGui_ImplMetal_InitPlatformInterface();
+    ImGui_ImplMetal_InitMultiViewportSupport();
 
     return true;
 }
@@ -156,7 +159,7 @@ void ImGui_ImplMetal_Shutdown()
     ImGui_ImplMetal_Data* bd = ImGui_ImplMetal_GetBackendData();
     IM_UNUSED(bd);
     IM_ASSERT(bd != nullptr && "No renderer backend to shutdown, or already shutdown?");
-    ImGui_ImplMetal_ShutdownPlatformInterface();
+    ImGui_ImplMetal_ShutdownMultiViewportSupport();
     ImGui_ImplMetal_DestroyDeviceObjects();
     ImGui_ImplMetal_DestroyBackendData();
 
@@ -381,6 +384,7 @@ bool ImGui_ImplMetal_CreateDeviceObjects(id<MTLDevice> device)
     depthStencilDescriptor.depthWriteEnabled = NO;
     depthStencilDescriptor.depthCompareFunction = MTLCompareFunctionAlways;
     bd->SharedMetalContext.depthStencilState = [device newDepthStencilStateWithDescriptor:depthStencilDescriptor];
+    ImGui_ImplMetal_CreateDeviceObjectsForPlatformWindows();
 #ifdef IMGUI_IMPL_METAL_CPP
     [depthStencilDescriptor release];
 #endif
@@ -511,7 +515,7 @@ static void ImGui_ImplMetal_RenderWindow(ImGuiViewport* viewport, void*)
     [commandBuffer commit];
 }
 
-static void ImGui_ImplMetal_InitPlatformInterface()
+static void ImGui_ImplMetal_InitMultiViewportSupport()
 {
     ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
     platform_io.Renderer_CreateWindow = ImGui_ImplMetal_CreateWindow;
@@ -520,7 +524,7 @@ static void ImGui_ImplMetal_InitPlatformInterface()
     platform_io.Renderer_RenderWindow = ImGui_ImplMetal_RenderWindow;
 }
 
-static void ImGui_ImplMetal_ShutdownPlatformInterface()
+static void ImGui_ImplMetal_ShutdownMultiViewportSupport()
 {
     ImGui::DestroyPlatformWindows();
 }

@@ -105,6 +105,19 @@ Other changes:
   pColorAttachmentFormats buffer when set, in order to reduce common user-error of
   specifying a pointer to data that gets out of scope. (#8282)
 
+Docking+Viewports Branch:
+
+- Backends: Win32: Viewports: fixed an issue when closing a window from 
+  the OS close button (with io.ConfigViewportsNoDecoration=false) while 
+  user code is discarding the 'bool *p_open=false output' from Begin(). 
+  Because we allowed the Win32 window to close early, Windows destroyed
+  it and our imgui window became not visible even though user code was
+  still submitting it.
+- Backends: SDLGPU3 for SDL3: added multi-viewport support. (#8573) [@Lekoopapaul]
+- Backends: SDL2, SDL3: revert updating monitors and work areas info every
+  frame. Only do it on Windows to detect task-bar resize until we get an
+  adequate event for it. (#8415, #8558)
+
 
 -----------------------------------------------------------------------
  VERSION 1.91.9b (Released 2025-03-17)
@@ -236,6 +249,8 @@ Other changes:
   with asserts enabled. (#8452)
 - Backends: SDL2, SDL3: Using SDL_OpenURL() in platform_io.Platform_OpenInShellFn
   handler. (#7660) [@achabense]
+- Backends: SDL2, SDL3: Use display bounds when SDL_GetDisplayUsableBounds() 
+  fails or return a zero size. (#8415, #3457)
 - Backends: SDL2, SDL3, Win32, Allegro5: Added support for ImGuiMouseCursor_Wait
   and ImGuiMouseCursor_Progress cursors.
 - Backends: SDL2, SDL3: Avoid calling SDL_GetGlobalMouseState() when mouse is in
@@ -257,6 +272,22 @@ Other changes:
 - Backends: WebGPU: Fix for DAWN API change WGPUProgrammableStageDescriptor -> WGPUComputeState.
   [@PhantomCloak] (#8369)
 - Backends: WebGPU: Fix for webgpu-native API changes. (#8426) [@pplux]
+
+Docking+Viewports Branch:
+
+- Docking: Removed legacy assert preventing to call DockBuilderSplitNode() on an existing
+  split node. This makes using DockBuilder a little more flexible and bearable! (#8472) [@MegaMech]
+- Viewports: fixed an issue where in certain cases, a window repositioning leading 
+  to a monitor change could have the window incorrectly get clamped within the boundaries 
+  of its previous monitor. Would happen e.g. when loading .ini data during runtime. (#8484) 
+- Viewports: fixed an assert when a window load settings with a position outside
+  monitor bounds, when there are multiple monitors. (#8393, #8385) [@gaborodriguez]
+- Viewports + Backends: Win32: Fixed setting title bar text when application
+  is compiled without UNICODE. (#7979, #5725) [@lailoken]
+- Backends: GLFW, SDL2/SDL3: Update monitors and work areas information every frame,
+  as the later may change regardless of monitor/display changes. (#8415)
+- Backends: Win32: WM_SETTINGCHANGE's SPI_SETWORKAREA message also triggers a refresh
+  of monitor list, as they contain work area information. (#8415) [@PathogenDavid, @lailoken]
 
 
 -----------------------------------------------------------------------
@@ -320,7 +351,7 @@ Other changes:
   one without the other is never correct. (#8174, #6556, #6336, #4723)
 - Examples: DirectX12: Reduced number of frame in flight from 3 to 2 in
   provided example, to reduce latency.
-- Examples: Vulkan: better handle VK_SUBOPTIMAL_KHR being returned by
+- Backends+Examples: Vulkan: better handle VK_SUBOPTIMAL_KHR being returned by
   vkAcquireNextImageKHR() or vkQueuePresentKHR(). (#7825, #7831) [@NostraMagister]
 - Backends: SDL2: removed assert preventing using ImGui_ImplSDL2_SetGamepadMode()
   with ImGui_ImplSDL2_GamepadMode_Manual and an empty array. (#8329)
@@ -333,6 +364,14 @@ Other changes:
 - Backends: DirectX12: Texture upload use the command queue provided in
   ImGui_ImplDX12_InitInfo instead of creating its own.
 - Backends: OSX: Removed notification observer when shutting down. (#8331) [@jrachele]
+
+Docking+Viewports Branch:
+
+- Docking: Fixed an issue in 1.91.7 where using legacy ImGuiWindowFlags_NavFlattened
+  flag (instead of ImGuiChildFlags_NavFlattened) in docking branch would conflict
+  with internal docking flags. (#8357) [@DanielGibson]
+- Backends: SDL3: new viewport windows are created with the SDL_WINDOW_HIDDEN flag
+  before calling SDL_ShowWindow(). (#8328) [@PathogenDavid]
 
 
 -----------------------------------------------------------------------
@@ -468,6 +507,15 @@ Other changes:
 - Examples: Win32+DX12: Using a basic free-list allocator to manage multiple
   SRV descriptors.
 
+Docking+Viewports Branch:
+
+- Docking: Added an assert to clarify that ImGuiDockNodeFlags_CentralNode flag
+  (from internals) does not need to be passed to DockSpace(), as it causes general
+  havoc. (#8145)
+- Backends: Win32: Fixed a crash/regression in 1.91.5 when running two processes
+  with multi-viewports (was using GetProp() to query property which could have
+  belonged to another process). (#8162, #8069) [@sammyfreg, @ocornut]
+
 
 -----------------------------------------------------------------------
  VERSION 1.91.5 (Released 2024-11-07)
@@ -525,6 +573,15 @@ Other changes:
 - Examples: SDL3+Vulkan: Added example. (#8084, #8085)
 - Examples: Android+OpenGL: Using ALooper_pollOnce() instead of ALooper_pollAll()
   which has been deprecated. (#8013) [@feather179]
+
+Docking+Viewports Branch:
+
+- Backends: GLFW: added Linux workaround for spurious mouse up events emitted while dragging
+  and creating new viewports. Generally they would be interrupting a dragging operations.
+  (#3158, #7733, #7922) [@rokups, @ocornut]
+- Docking: fixed using ImGuiDockNodeFlags_KeepAliveOnly with DockSpaceOverViewport():
+  the normally invisible space did erroneously claim mouse hover and could be potentially
+  focused. (#8125) [@kcbanner]
 
 
 -----------------------------------------------------------------------
@@ -615,6 +672,11 @@ Other changes:
 - Backends: DX9, DX10, DX11, DX12, OpenGL, Vulkan, WGPU: Changed default texture sampler
   to Clamp instead of Repeat/Wrap. (#7468, #7511, #5999, #5502, #7230)
 
+Docking+Viewports Branch:
+
+- Backends: changed all backends to allow enabling ImGuiConfigFlags_ViewportsEnable
+  after initialization. (#5371)
+
 
 -----------------------------------------------------------------------
  VERSION 1.91.3 (Released 2024-10-04)
@@ -678,6 +740,13 @@ Other changes:
 - Backends: WebGPU: Fixed DAWN api change using WGPUStringView in WGPUShaderSourceWGSL.
   (#8009, #8010) [@blitz-research]
 
+Docking+Viewports Branch:
+
+- Backends: SDL2, SDL3: Fixed building for UWP platforms. (#8008)
+- Backends: Win32: Use ResisterClassW()/CreateWindowExW() for secondary viewports, to
+  ensure correct IME input even if the backend was compiled in MBCS mode. (#7979, #5725)
+
+
 -----------------------------------------------------------------------
  VERSION 1.91.2 (Released 2024-09-19)
 -----------------------------------------------------------------------
@@ -737,6 +806,18 @@ Other changes:
   [@ypujante]
 - Backends: WebGPU: Added support for optional IMGUI_IMPL_WEBGPU_BACKEND_DAWN / IMGUI_IMPL_WEBGPU_BACKEND_WGPU
   defines to handle ever-changing native implementations. (#7977, #7969, #6602, #6188, #7523) [@acgaudette]
+
+Docking+Viewports Branch:
+
+- Viewports: fixed an issue where a window manually constrained to the main viewport while crossing
+  over main viewport bounds isn't translated properly. (#7985)
+- Backends: SDL2, SDL3, Win32: ensure that ImGuiPlatformMonitor list is available after backend Init call. (#7995)
+- Backends: Win32: fixed direct calls to platform_io.Platform_SetWindowPos()/Platform_SetWindowSize()
+  on windows created by application (typically main viewport).
+- Backends: Win32: fixed an issue where a viewport destroyed while clicking would hog
+  mouse tracking and temporary lead to incorrect update of HoveredWindow. (#7971)
+- Backends: SDL3: added support for viewport->ParentViewportId field to support parenting
+  windows at OS level. (#7973, #7989) [@RT2code]
 
 -----------------------------------------------------------------------
  VERSION 1.91.1 (Released 2024-09-04)
@@ -820,6 +901,16 @@ Other changes:
   - Examples: GLFW (all), SDL2 (all), SDL3 (all), Win32+OpenGL3: rework examples main loop
     to handle minimization without burning CPU or GPU by running unthrottled code. (#7844)
   - Examples: SDL3: Update for API changes: SDL_Init() returns 0 on failure.
+
+Docking+Viewports Branch:
+
+- Viewports: added optional platform_io.Platform_GetWindowWorkAreaInsets() hook
+  to allow backends to alter the default per-viewport work-area. (#7823)
+- Backends: don't report monitors with DpiScale of 0, which seemed to be reported for
+  virtual monitors instead by accessibility drivers. (#7902) [@nicolasnoble, @ocornut]
+- Backends: SDL2, SDL3: using SDL_HINT_WINDOW_NO_ACTIVATION_WHEN_SHOWN to support the
+  ImGuiViewportFlags_NoFocusOnAppearing flag, instead of using a Win32-specific hack.
+  (#7896) [@RT2Code]
 
 -----------------------------------------------------------------------
  VERSION 1.91.0 (Released 2024-07-30)
@@ -980,6 +1071,16 @@ Other changes:
   - Backends: GLFW+Emscripten: Fixed Emscripten warning when using mouse wheel on some setups
     "Unable to preventDefault inside passive event listener". (#7647, #7600) [@ypujante]
 
+Docking+Viewports Branch:
+
+- Viewports: Always update fallback monitor to primary monitor if there's one.
+- Backends: OSX: Fixed NSAppKitVersion version limit for setWantsBestResolutionOpenGLSurface
+  usage. (#7814) [@YGXXD]
+- Backends: SDL3: Fixed a bug preventing ImGuiViewportFlags_NoFocusOnAppearing support from
+  working (Windows only).
+- Backends: Vulkan: ImGui_ImplVulkan_SwapBuffers() used by secondary viewports still proceeds
+  increasing frame counters on VK_SUBOPTIMAL_KHR. (#7825, #3881) [@NostraMagister]
+
 
 -----------------------------------------------------------------------
  VERSION 1.90.9 (Released 2024-07-01)
@@ -1060,6 +1161,19 @@ Other changes:
 - Examples: GLFW+Vulkan, SDL+Vulkan: handle swap chain resize even without Vulkan
   returning VK_SUBOPTIMAL_KHR, which doesn't seem to happen on Wayland. (#7671)
   [@AndreiNego, @ocornut]
+
+Docking+Viewports Branch:
+
+- Windows, Menus: Fixed an issue where the size of sub-menu in their own viewport
+  would be erroneously clamped to the size of main viewport. (#7730)
+- Merged GetBackgroundDrawList() and GetBackgroundDrawList(ImGuiViewport* viewport)
+  api entry points into a same one GetBackgroundDrawList(ImGuiViewport* viewport = NULL);
+- Merged GetForegroundDrawList() and GetForegroundDrawList(ImGuiViewport* viewport)
+  api entry points into a same one GetForegroundDrawList(ImGuiViewport* viewport = NULL);
+- Backends: SDL3: Update for introduction of SDL_GLContext from void*. (#7701, #7702)
+  [@bcsanches]
+- Backends: Win32: Secondary viewports WndProc handler retrieve/set imgui context from
+  the HWND, allowing WndProc dispatch to work in multi-context setups.
 
 
 -----------------------------------------------------------------------
@@ -1210,7 +1324,6 @@ versions of IsKeyPressed(), IsKeyChordPressed(), IsMouseClicked() prior to this 
 - For several reasons those changes makes sense. They were all made before making some of
   those API public. Only past users of imgui_internal.h with the extra parameters will be affected.
   Added asserts for valid flags in various functions to detect _some_ misuses, BUT NOT ALL.
-
 
 Docking+Viewports Branch:
 

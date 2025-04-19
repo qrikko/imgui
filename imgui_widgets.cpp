@@ -518,7 +518,7 @@ bool ImGui::ButtonBehavior(const ImRect& bb, ImGuiID id, bool* out_hovered, bool
         flags |= (item_flags & ImGuiItemFlags_ButtonRepeat) ? ImGuiButtonFlags_PressedOnClick : ImGuiButtonFlags_PressedOnDefault_;
 
     ImGuiWindow* backup_hovered_window = g.HoveredWindow;
-    const bool flatten_hovered_children = (flags & ImGuiButtonFlags_FlattenChildren) && g.HoveredWindow && g.HoveredWindow->RootWindow == window->RootWindow;
+    const bool flatten_hovered_children = (flags & ImGuiButtonFlags_FlattenChildren) && g.HoveredWindow && g.HoveredWindow->RootWindowDockTree == window->RootWindowDockTree;
     if (flatten_hovered_children)
         g.HoveredWindow = window;
 
@@ -897,7 +897,11 @@ bool ImGui::CollapseButton(ImGuiID id, const ImVec2& pos, ImGuiDockNode* dock_no
     if (hovered || held)
         window->DrawList->AddRectFilled(bb.Min, bb.Max, bg_col);
     RenderNavCursor(bb, id, ImGuiNavRenderCursorFlags_Compact);
-    RenderArrow(window->DrawList, bb.Min, text_col, window->Collapsed ? ImGuiDir_Right : ImGuiDir_Down, 1.0f);
+
+    if (dock_node)
+        RenderArrowDockMenu(window->DrawList, bb.Min, g.FontSize, text_col);
+    else
+        RenderArrow(window->DrawList, bb.Min, text_col, window->Collapsed ? ImGuiDir_Right : ImGuiDir_Down, 1.0f);
 
     // Switch to moving the window after mouse is moved beyond the initial drag threshold
     if (IsItemActive() && IsMouseDragging(0))
@@ -8768,9 +8772,10 @@ bool ImGui::BeginMenuBar()
 
     // We don't clip with current window clipping rectangle as it is already set to the area below. However we clip with window full rect.
     // We remove 1 worth of rounding to Max.x to that text in long menus and small windows don't tend to display over the lower-right rounded area, which looks particularly glitchy.
-    const float border_top = ImMax(window->WindowBorderSize * 0.5f - window->TitleBarHeight, 0.0f);
+    const float border_top = ImMax(IM_ROUND(window->WindowBorderSize * 0.5f - window->TitleBarHeight), 0.0f);
+    const float border_half = IM_ROUND(window->WindowBorderSize * 0.5f);
     ImRect bar_rect = window->MenuBarRect();
-    ImRect clip_rect(IM_ROUND(bar_rect.Min.x + window->WindowBorderSize * 0.5f), IM_ROUND(bar_rect.Min.y + border_top), IM_ROUND(ImMax(bar_rect.Min.x, bar_rect.Max.x - ImMax(window->WindowRounding, window->WindowBorderSize * 0.5f))), IM_ROUND(bar_rect.Max.y));
+    ImRect clip_rect(ImFloor(bar_rect.Min.x + border_half), ImFloor(bar_rect.Min.y + border_top), ImFloor(ImMax(bar_rect.Min.x, bar_rect.Max.x - ImMax(window->WindowRounding, border_half))), ImFloor(bar_rect.Max.y));
     clip_rect.ClipWith(window->OuterRectClipped);
     PushClipRect(clip_rect.Min, clip_rect.Max, false);
 
@@ -10458,7 +10463,7 @@ bool    ImGui::TabItemEx(ImGuiTabBar* tab_bar, const char* label, bool* p_open, 
             flags |= ImGuiTabItemFlags_NoCloseWithMiddleMouseButton;
 
         // Render tab label, process close button
-        const ImGuiID close_button_id = p_open ? GetIDWithSeed("#CLOSE", NULL, id) : 0;
+        const ImGuiID close_button_id = p_open ? GetIDWithSeed("#CLOSE", NULL, docked_window ? docked_window->ID : id) : 0;
         bool just_closed;
         bool text_clipped;
         TabItemLabelAndCloseButton(display_draw_list, bb, tab_just_unsaved ? (flags & ~ImGuiTabItemFlags_UnsavedDocument) : flags, tab_bar->FramePadding, label, id, close_button_id, tab_contents_visible, &just_closed, &text_clipped);
@@ -10467,6 +10472,11 @@ bool    ImGui::TabItemEx(ImGuiTabBar* tab_bar, const char* label, bool* p_open, 
             *p_open = false;
             TabBarCloseTab(tab_bar, tab);
         }
+
+        // Forward Hovered state so IsItemHovered() after Begin() can work (even though we are technically hovering our parent)
+        // That state is copied to window->DockTabItemStatusFlags by our caller.
+        if (docked_window && (hovered || g.HoveredId == close_button_id))
+            g.LastItemData.StatusFlags |= ImGuiItemStatusFlags_HoveredWindow;
 
         // Tooltip
         // (Won't work over the close button because ItemOverlap systems messes up with HoveredIdTimer-> seems ok)
@@ -10477,11 +10487,6 @@ bool    ImGui::TabItemEx(ImGuiTabBar* tab_bar, const char* label, bool* p_open, 
             if (!(tab_bar->Flags & ImGuiTabBarFlags_NoTooltip) && !(tab->Flags & ImGuiTabItemFlags_NoTooltip))
                 SetItemTooltip("%.*s", (int)(FindRenderedTextEnd(label) - label), label);
     }
-
-    // Forward Hovered state so IsItemHovered() after Begin() can work (even though we are technically hovering our parent)
-    // That state is copied to window->DockTabItemStatusFlags by our caller.
-    if (docked_window && (hovered || g.HoveredId == close_button_id))
-        g.LastItemData.StatusFlags |= ImGuiItemStatusFlags_HoveredWindow;
 
     // Restore main window position so user can draw there
     if (want_clip_rect)

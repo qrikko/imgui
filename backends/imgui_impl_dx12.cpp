@@ -5,6 +5,8 @@
 //  [X] Renderer: User texture binding. Use 'D3D12_GPU_DESCRIPTOR_HANDLE' as ImTextureID. Read the FAQ about ImTextureID!
 //  [X] Renderer: Large meshes support (64k+ vertices) even with 16-bit indices (ImGuiBackendFlags_RendererHasVtxOffset).
 //  [X] Renderer: Expose selected render state for draw callbacks to use. Access in '(ImGui_ImplXXXX_RenderState*)GetPlatformIO().Renderer_RenderState'.
+//  [X] Renderer: Multi-viewport support (multiple windows). Enable with 'io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable'.
+//      FIXME: The transition from removing a viewport and moving the window in an existing hosted viewport tends to flicker.
 
 // The aim of imgui_impl_dx12.h/.cpp is to be usable in your engine without any modification.
 // IF YOU FEEL YOU NEED TO MAKE ANY CHANGE TO THIS CODE, please share them and your feedback at https://github.com/ocornut/imgui/
@@ -19,6 +21,7 @@
 
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
+//  2025-XX-XX: Platform: Added support for multiple windows via the ImGuiPlatformIO interface.
 //  2025-02-24: DirectX12: Fixed an issue where ImGui_ImplDX12_Init() signature change from 2024-11-15 combined with change from 2025-01-15 made legacy ImGui_ImplDX12_Init() crash. (#8429)
 //  2025-01-15: DirectX12: Texture upload use the command queue provided in ImGui_ImplDX12_InitInfo instead of creating its own.
 //  2024-12-09: DirectX12: Let user specifies the DepthStencilView format by setting ImGui_ImplDX12_InitInfo::DSVFormat.
@@ -82,14 +85,10 @@ struct ImGui_ImplDX12_Data
     DXGI_FORMAT                 DSVFormat;
     ID3D12DescriptorHeap*       pd3dSrvDescHeap;
     UINT                        numFramesInFlight;
-
-    ImGui_ImplDX12_RenderBuffers* pFrameResources;
-    UINT                        frameIndex;
-
     ImGui_ImplDX12_Texture      FontTexture;
     bool                        LegacySingleDescriptorUsed;
 
-    ImGui_ImplDX12_Data()       { memset((void*)this, 0, sizeof(*this)); frameIndex = UINT_MAX; }
+    ImGui_ImplDX12_Data()       { memset((void*)this, 0, sizeof(*this)); }
 };
 
 // Backend data stored in io.BackendRendererUserData to allow support for multiple Dear ImGui contexts
@@ -793,13 +792,6 @@ void    ImGui_ImplDX12_InvalidateDeviceObjects()
     bd->InitInfo.SrvDescriptorFreeFn(&bd->InitInfo, font_tex->hFontSrvCpuDescHandle, font_tex->hFontSrvGpuDescHandle);
     SafeRelease(font_tex->pTextureResource);
     io.Fonts->SetTexID(0); // We copied bd->hFontSrvGpuDescHandle to io.Fonts->TexID so let's clear that as well.
-
-    for (UINT i = 0; i < bd->numFramesInFlight; i++)
-    {
-        ImGui_ImplDX12_RenderBuffers* fr = &bd->pFrameResources[i];
-        SafeRelease(fr->IndexBuffer);
-        SafeRelease(fr->VertexBuffer);
-    }
 }
 
 bool ImGui_ImplDX12_Init(ImGui_ImplDX12_InitInfo* init_info)
@@ -828,6 +820,11 @@ bool ImGui_ImplDX12_Init(ImGui_ImplDX12_InitInfo* init_info)
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
         ImGui_ImplDX12_InitPlatformInterface();
 
+    // Create a dummy ImGui_ImplDX12_ViewportData holder for the main viewport,
+    // Since this is created and managed by the application, we will only use the ->Resources[] fields.
+    ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+    main_viewport->RendererUserData = IM_NEW(ImGui_ImplDX12_ViewportData)(bd->numFramesInFlight);
+
 #ifndef IMGUI_DISABLE_OBSOLETE_FUNCTIONS
     if (init_info->SrvDescriptorAllocFn == nullptr)
     {
@@ -853,18 +850,6 @@ bool ImGui_ImplDX12_Init(ImGui_ImplDX12_InitInfo* init_info)
     // Allocate 1 SRV descriptor for the font texture
     IM_ASSERT(init_info->SrvDescriptorAllocFn != nullptr && init_info->SrvDescriptorFreeFn != nullptr);
     init_info->SrvDescriptorAllocFn(&bd->InitInfo, &bd->FontTexture.hFontSrvCpuDescHandle, &bd->FontTexture.hFontSrvGpuDescHandle);
-
-    // Create buffers with a default size (they will later be grown as needed)
-    bd->frameIndex = UINT_MAX;
-    bd->pFrameResources = new ImGui_ImplDX12_RenderBuffers[bd->numFramesInFlight];
-    for (int i = 0; i < (int)bd->numFramesInFlight; i++)
-    {
-        ImGui_ImplDX12_RenderBuffers* fr = &bd->pFrameResources[i];
-        fr->IndexBuffer = nullptr;
-        fr->VertexBuffer = nullptr;
-        fr->IndexBufferSize = 10000;
-        fr->VertexBufferSize = 5000;
-    }
 
     return true;
 }
@@ -916,7 +901,6 @@ void ImGui_ImplDX12_Shutdown()
     // Clean up windows and device objects
     ImGui_ImplDX12_ShutdownPlatformInterface();
     ImGui_ImplDX12_InvalidateDeviceObjects();
-    delete[] bd->pFrameResources;
 
     io.BackendRendererName = nullptr;
     io.BackendRendererUserData = nullptr;
@@ -945,7 +929,7 @@ static void ImGui_ImplDX12_CreateWindow(ImGuiViewport* viewport)
     ImGui_ImplDX12_ViewportData* vd = IM_NEW(ImGui_ImplDX12_ViewportData)(bd->numFramesInFlight);
     viewport->RendererUserData = vd;
 
-    // PlatformHandleRaw should always be a HWND, whereas PlatformHandle might be a higher-level handle (e.g. GLFWWindow*, SDL_Window*).
+    // PlatformHandleRaw should always be a HWND, whereas PlatformHandle might be a higher-level handle (e.g. GLFWWindow*, SDL's WindowID).
     // Some backends will leave PlatformHandleRaw == 0, in which case we assume PlatformHandle will contain the HWND.
     HWND hwnd = viewport->PlatformHandleRaw ? (HWND)viewport->PlatformHandleRaw : (HWND)viewport->PlatformHandle;
     IM_ASSERT(hwnd != 0);

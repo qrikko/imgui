@@ -148,6 +148,10 @@ struct ImGuiContext;                // Main Dear ImGui context
 struct ImGuiContextHook;            // Hook for extensions like ImGuiTestEngine
 struct ImGuiDataTypeInfo;           // Type information associated to a ImGuiDataType enum
 struct ImGuiDeactivatedItemData;    // Data for IsItemDeactivated()/IsItemDeactivatedAfterEdit() function.
+struct ImGuiDockContext;            // Docking system context
+struct ImGuiDockRequest;            // Docking system dock/undock queued request
+struct ImGuiDockNode;               // Docking system node (hold a list of Windows OR two child dock nodes)
+struct ImGuiDockNodeSettings;       // Storage for a dock node in .ini file (we preserve those even if the associated dock node isn't active during the session)
 struct ImGuiErrorRecoveryState;     // Storage of stack sizes for error handling and recovery
 struct ImGuiGroupData;              // Stacked storage data for BeginGroup()/EndGroup()
 struct ImGuiInputTextState;         // Internal state of the currently focused/edited text input box
@@ -1219,6 +1223,9 @@ enum ImGuiNextWindowDataFlags_
     ImGuiNextWindowDataFlags_HasWindowFlags     = 1 << 8,
     ImGuiNextWindowDataFlags_HasChildFlags      = 1 << 9,
     ImGuiNextWindowDataFlags_HasRefreshPolicy   = 1 << 10,
+    ImGuiNextWindowDataFlags_HasViewport        = 1 << 11,
+    ImGuiNextWindowDataFlags_HasDock            = 1 << 12,
+    ImGuiNextWindowDataFlags_HasWindowClass     = 1 << 13,
 };
 
 // Storage for SetNexWindow** functions
@@ -1877,6 +1884,7 @@ enum ImGuiDockNodeFlagsPrivate_
     ImGuiDockNodeFlags_NoResizeX                = 1 << 16,  //       //
     ImGuiDockNodeFlags_NoResizeY                = 1 << 17,  //       //
     ImGuiDockNodeFlags_DockedWindowsInFocusRoute= 1 << 18,  //       // Any docked window will be automatically be focus-route chained (window->ParentWindowForFocusRoute set to this) so Shortcut() in this window can run when any docked window is focused.
+
     // Disable docking/undocking actions in this dockspace or individual node (existing docked nodes will be preserved)
     // Those are not exposed in public because the desirable sharing/inheriting/copy-flag-on-split behaviors are quite difficult to design and understand.
     // The two public flags ImGuiDockNodeFlags_NoDockingOverCentralNode/ImGuiDockNodeFlags_NoDockingSplit don't have those issues.
@@ -1885,11 +1893,13 @@ enum ImGuiDockNodeFlagsPrivate_
     ImGuiDockNodeFlags_NoDockingOverOther       = 1 << 21,  //       // Disable this node from being docked over another window or non-empty node.
     ImGuiDockNodeFlags_NoDockingOverEmpty       = 1 << 22,  //       // Disable this node from being docked over an empty node (e.g. DockSpace with no other windows)
     ImGuiDockNodeFlags_NoDocking                = ImGuiDockNodeFlags_NoDockingOverMe | ImGuiDockNodeFlags_NoDockingOverOther | ImGuiDockNodeFlags_NoDockingOverEmpty | ImGuiDockNodeFlags_NoDockingSplit | ImGuiDockNodeFlags_NoDockingSplitOther,
+
     // Masks
     ImGuiDockNodeFlags_SharedFlagsInheritMask_  = ~0,
-    ImGuiDockNodeFlags_NoResizeFlagsMask_       = ImGuiDockNodeFlags_NoResize | ImGuiDockNodeFlags_NoResizeX | ImGuiDockNodeFlags_NoResizeY,
+    ImGuiDockNodeFlags_NoResizeFlagsMask_       = (int)ImGuiDockNodeFlags_NoResize | ImGuiDockNodeFlags_NoResizeX | ImGuiDockNodeFlags_NoResizeY,
+
     // When splitting, those local flags are moved to the inheriting child, never duplicated
-    ImGuiDockNodeFlags_LocalFlagsTransferMask_  = ImGuiDockNodeFlags_NoDockingSplit | ImGuiDockNodeFlags_NoResizeFlagsMask_ | ImGuiDockNodeFlags_AutoHideTabBar | ImGuiDockNodeFlags_CentralNode | ImGuiDockNodeFlags_NoTabBar | ImGuiDockNodeFlags_HiddenTabBar | ImGuiDockNodeFlags_NoWindowMenuButton | ImGuiDockNodeFlags_NoCloseButton,
+    ImGuiDockNodeFlags_LocalFlagsTransferMask_  = (int)ImGuiDockNodeFlags_NoDockingSplit | ImGuiDockNodeFlags_NoResizeFlagsMask_ | (int)ImGuiDockNodeFlags_AutoHideTabBar | ImGuiDockNodeFlags_CentralNode | ImGuiDockNodeFlags_NoTabBar | ImGuiDockNodeFlags_HiddenTabBar | ImGuiDockNodeFlags_NoWindowMenuButton | ImGuiDockNodeFlags_NoCloseButton,
     ImGuiDockNodeFlags_SavedFlagsMask_          = ImGuiDockNodeFlags_NoResizeFlagsMask_ | ImGuiDockNodeFlags_DockSpace | ImGuiDockNodeFlags_CentralNode | ImGuiDockNodeFlags_NoTabBar | ImGuiDockNodeFlags_HiddenTabBar | ImGuiDockNodeFlags_NoWindowMenuButton | ImGuiDockNodeFlags_NoCloseButton,
 };
 
@@ -1980,11 +1990,13 @@ struct IMGUI_API ImGuiDockNode
 enum ImGuiWindowDockStyleCol
 {
     ImGuiWindowDockStyleCol_Text,
-    ImGuiWindowDockStyleCol_Tab,
     ImGuiWindowDockStyleCol_TabHovered,
-    ImGuiWindowDockStyleCol_TabActive,
-    ImGuiWindowDockStyleCol_TabUnfocused,
-    ImGuiWindowDockStyleCol_TabUnfocusedActive,
+    ImGuiWindowDockStyleCol_TabFocused,
+    ImGuiWindowDockStyleCol_TabSelected,
+    ImGuiWindowDockStyleCol_TabSelectedOverline,
+    ImGuiWindowDockStyleCol_TabDimmed,
+    ImGuiWindowDockStyleCol_TabDimmedSelected,
+    ImGuiWindowDockStyleCol_TabDimmedSelectedOverline,
     ImGuiWindowDockStyleCol_COUNT
 };
 
@@ -2019,6 +2031,7 @@ struct ImGuiViewportP : public ImGuiViewport
     int                 LastFocusedStampCount;  // Last stamp number from when a window hosted by this viewport was focused (by comparing this value between two viewport we have an implicit viewport z-order we use as fallback)
     ImGuiID             LastNameHash;
     ImVec2              LastPos;
+    ImVec2              LastSize;
     float               Alpha;                  // Window opacity (when dragging dockable windows/viewports we make them transparent)
     float               LastAlpha;
     bool                LastFocusedHadNavWindow;// Instead of maintaining a LastFocusedWindow (which may harder to correctly maintain), we merely store weither NavWindow != NULL last time the viewport was focused.
@@ -2027,6 +2040,9 @@ struct ImGuiViewportP : public ImGuiViewport
     ImDrawList*         BgFgDrawLists[2];       // Convenience background (0) and foreground (1) draw lists. We use them to draw software mouser cursor when io.MouseDrawCursor is set and to draw most debug overlays.
     ImDrawData          DrawDataP;
     ImDrawDataBuilder   DrawDataBuilder;        // Temporary data while building final ImDrawData
+    ImVec2              LastPlatformPos;
+    ImVec2              LastPlatformSize;
+    ImVec2              LastRendererSize;
 
     // Per-viewport work area
     // - Insets are >= 0.0f values, distance from viewport corners to work area.
@@ -2110,6 +2126,9 @@ enum ImGuiLocKey : int
     ImGuiLocKey_WindowingUntitled,
     ImGuiLocKey_OpenLink_s,
     ImGuiLocKey_CopyLink,
+    ImGuiLocKey_DockingHideTabBar,
+    ImGuiLocKey_DockingHoldShiftToDock,
+    ImGuiLocKey_DockingDragToUndockOrMoveNode,
     ImGuiLocKey_COUNT
 };
 
@@ -2154,8 +2173,8 @@ enum ImGuiDebugLogFlags_
     ImGuiDebugLogFlags_EventIO              = 1 << 7,
     ImGuiDebugLogFlags_EventFont            = 1 << 8,
     ImGuiDebugLogFlags_EventInputRouting    = 1 << 9,
-    ImGuiDebugLogFlags_EventDocking         = 1 << 10,  // Unused in this branch
-    ImGuiDebugLogFlags_EventViewport        = 1 << 11,  // Unused in this branch
+    ImGuiDebugLogFlags_EventDocking         = 1 << 10,
+    ImGuiDebugLogFlags_EventViewport        = 1 << 11,
 
     ImGuiDebugLogFlags_EventMask_           = ImGuiDebugLogFlags_EventError | ImGuiDebugLogFlags_EventActiveId | ImGuiDebugLogFlags_EventFocus | ImGuiDebugLogFlags_EventPopup | ImGuiDebugLogFlags_EventNav | ImGuiDebugLogFlags_EventClipper | ImGuiDebugLogFlags_EventSelection | ImGuiDebugLogFlags_EventIO | ImGuiDebugLogFlags_EventFont | ImGuiDebugLogFlags_EventInputRouting | ImGuiDebugLogFlags_EventDocking | ImGuiDebugLogFlags_EventViewport,
     ImGuiDebugLogFlags_OutputToTTY          = 1 << 20,  // Also send output to TTY
@@ -2189,6 +2208,7 @@ struct ImGuiMetricsConfig
     bool        ShowDrawCmdMesh = true;
     bool        ShowDrawCmdBoundingBoxes = true;
     bool        ShowTextEncodingViewer = false;
+    bool        ShowDockingNodes = false;
     int         ShowWindowsRectsType = -1;
     int         ShowTablesRectsType = -1;
     int         HighlightMonitorIdx = -1;
@@ -2255,7 +2275,7 @@ struct ImGuiContext
     float                   FontSize;                           // (Shortcut) == FontBaseSize * g.CurrentWindow->FontWindowScale == window->FontSize(). Text height for current window.
     float                   FontBaseSize;                       // (Shortcut) == IO.FontGlobalScale * Font->Scale * Font->FontSize. Base text height.
     float                   FontScale;                          // == FontSize / Font->FontSize
-    float                   CurrentDpiScale;                    // Current window/viewport DpiScale
+    float                   CurrentDpiScale;                    // Current window/viewport DpiScale == CurrentViewport->DpiScale
     ImDrawListSharedData    DrawListSharedData;
     double                  Time;
     int                     FrameCount;
@@ -2289,7 +2309,7 @@ struct ImGuiContext
     ImGuiWindow*            HoveredWindow;                      // Window the mouse is hovering. Will typically catch mouse inputs.
     ImGuiWindow*            HoveredWindowUnderMovingWindow;     // Hovered window ignoring MovingWindow. Only set if MovingWindow is set.
     ImGuiWindow*            HoveredWindowBeforeClear;           // Window the mouse is hovering. Filled even with _NoMouse. This is currently useful for multi-context compositors.
-    ImGuiWindow*            MovingWindow;                       // Track the window we clicked on (in order to preserve focus). The actual window that is moved is generally MovingWindow->RootWindow.
+    ImGuiWindow*            MovingWindow;                       // Track the window we clicked on (in order to preserve focus). The actual window that is moved is generally MovingWindow->RootWindowDockTree.
     ImGuiWindow*            WheelingWindow;                     // Track the window we started mouse-wheeling on. Until a timer elapse or mouse has moved, generally keep scrolling the same window even if during the course of scrolling the mouse ends up hovering a child window.
     ImVec2                  WheelingWindowRefMousePos;
     int                     WheelingWindowStartFrame;           // This may be set one frame before WheelingWindow is != NULL
@@ -2547,6 +2567,12 @@ struct ImGuiContext
     // Platform support
     ImGuiPlatformImeData    PlatformImeData;                    // Data updated by current frame
     ImGuiPlatformImeData    PlatformImeDataPrev;                // Previous frame data. When changed we call the platform_io.Platform_SetImeDataFn() handler.
+    ImGuiID                 PlatformImeViewport;
+
+    // Extensions
+    // FIXME: We could provide an API to register one slot in an array held in ImGuiContext?
+    ImGuiDockContext        DockContext;
+    void                    (*DockNodeWindowMenuHandler)(ImGuiContext* ctx, ImGuiDockNode* node, ImGuiTabBar* tab_bar);
 
     // Settings
     bool                    SettingsLoaded;
@@ -2669,8 +2695,12 @@ struct IMGUI_API ImGuiWindowTempData
     ImGuiLayoutType         LayoutType;
     ImGuiLayoutType         ParentLayoutType;       // Layout type of parent window at the time of Begin()
     ImU32                   ModalDimBgColor;
+
+    // Status flags
     ImGuiItemStatusFlags    WindowItemStatusFlags;
     ImGuiItemStatusFlags    ChildItemStatusFlags;
+    ImGuiItemStatusFlags    DockTabItemStatusFlags;
+    ImRect                  DockTabItemRect;
 
     // Local parameters stacks
     // We store the current settings outside of the vectors to increase memory locality (reduce cache misses). The vectors are rarely modified. Also it allows us to not heap allocate for short-lived windows which are not using those settings.
@@ -2720,6 +2750,7 @@ struct IMGUI_API ImGuiWindow
     bool                    ScrollbarX, ScrollbarY;             // Are scrollbars visible?
     bool                    ScrollbarXStabilizeEnabled;         // Was ScrollbarX previously auto-stabilized?
     ImU8                    ScrollbarXStabilizeToggledHistory;  // Used to stabilize scrollbar visibility in case of feedback loops
+    bool                    ViewportOwned;
     bool                    Active;                             // Set to true on Begin(), unless Collapsed
     bool                    WasActive;
     bool                    WriteAccessed;                      // Set to true when any widget access the current window
@@ -2776,6 +2807,7 @@ struct IMGUI_API ImGuiWindow
     ImVector<ImGuiOldColumns> ColumnsStorage;
     float                   FontWindowScale;                    // User scale multiplier per-window, via SetWindowFontScale()
     float                   FontWindowScaleParents;
+    float                   FontDpiScale;
     float                   FontRefSize;                        // This is a copy of window->CalcFontSize() at the time of Begin(), trying to phase out CalcFontSize() especially as it may be called on non-current window.
     int                     SettingsOffset;                     // Offset into SettingsWindows[] (offsets are always valid as we only grow the array from the back)
 
@@ -2810,8 +2842,6 @@ struct IMGUI_API ImGuiWindow
     ImGuiDockNode*          DockNode;                           // Which node are we docked into. Important: Prefer testing DockIsActive in many cases as this will still be set when the dock node is hidden.
     ImGuiDockNode*          DockNodeAsHost;                     // Which node are we owning (for parent windows)
     ImGuiID                 DockId;                             // Backup of last valid DockNode->ID, so single window remember their dock node id even when they are not bound any more
-    ImGuiItemStatusFlags    DockTabItemStatusFlags;
-    ImRect                  DockTabItemRect;
 
 public:
     ImGuiWindow(ImGuiContext* context, const char* name);
@@ -2825,7 +2855,7 @@ public:
 
     // We don't use g.FontSize because the window may be != g.CurrentWindow.
     ImRect      Rect() const            { return ImRect(Pos.x, Pos.y, Pos.x + Size.x, Pos.y + Size.y); }
-    float       CalcFontSize() const    { ImGuiContext& g = *Ctx; return g.FontBaseSize * FontWindowScale * FontWindowScaleParents; }
+    float       CalcFontSize() const    { ImGuiContext& g = *Ctx; return g.FontBaseSize * FontWindowScale * FontDpiScale * FontWindowScaleParents; }
     ImRect      TitleBarRect() const    { return ImRect(Pos, ImVec2(Pos.x + SizeFull.x, Pos.y + TitleBarHeight)); }
     ImRect      MenuBarRect() const     { float y1 = Pos.y + TitleBarHeight; return ImRect(Pos.x, y1, Pos.x + SizeFull.x, y1 + MenuBarHeight); }
 };
@@ -2849,7 +2879,7 @@ enum ImGuiTabItemFlagsPrivate_
     ImGuiTabItemFlags_NoCloseButton             = 1 << 20,  // Track whether p_open was set or not (we'll need this info on the next frame to recompute ContentWidth during layout)
     ImGuiTabItemFlags_Button                    = 1 << 21,  // Used by TabItemButton, change the tab item behavior to mimic a button
     ImGuiTabItemFlags_Invisible                 = 1 << 22,  // To reserve space e.g. with ImGuiTabItemFlags_Leading
-    //ImGuiTabItemFlags_Unsorted                = 1 << 23,  // [Docking] Trailing tabs with the _Unsorted flag will be sorted based on the DockOrder of their Window.
+    ImGuiTabItemFlags_Unsorted                  = 1 << 23,  // [Docking] Trailing tabs with the _Unsorted flag will be sorted based on the DockOrder of their Window.
 };
 
 // Storage for one active tab item (sizeof() 48 bytes)
@@ -3254,9 +3284,7 @@ namespace ImGui
     IMGUI_API void          SetCurrentFont(ImFont* font);
     inline ImFont*          GetDefaultFont() { ImGuiContext& g = *GImGui; return g.IO.FontDefault ? g.IO.FontDefault : g.IO.Fonts->Fonts[0]; }
     IMGUI_API void          PushPasswordFont();
-    inline ImDrawList*      GetForegroundDrawList(ImGuiWindow* window) { IM_UNUSED(window); return GetForegroundDrawList(); } // This seemingly unnecessary wrapper simplifies compatibility between the 'master' and 'docking' branches.
-    IMGUI_API ImDrawList*   GetBackgroundDrawList(ImGuiViewport* viewport);                     // get background draw list for the given viewport. this draw list will be the first rendering one. Useful to quickly draw shapes/text behind dear imgui contents.
-    IMGUI_API ImDrawList*   GetForegroundDrawList(ImGuiViewport* viewport);                     // get foreground draw list for the given viewport. this draw list will be the last rendered one. Useful to quickly draw shapes/text over dear imgui contents.
+    inline ImDrawList*      GetForegroundDrawList(ImGuiWindow* window) { return GetForegroundDrawList(window->Viewport); }
     IMGUI_API void          AddDrawListToDrawDataEx(ImDrawData* draw_data, ImVector<ImDrawList*>* out_list, ImDrawList* draw_list);
 
     // Init
@@ -3278,7 +3306,9 @@ namespace ImGui
     IMGUI_API void          CallContextHooks(ImGuiContext* context, ImGuiContextHookType type);
 
     // Viewports
+    IMGUI_API void          TranslateWindowsInViewport(ImGuiViewportP* viewport, const ImVec2& old_pos, const ImVec2& new_pos, const ImVec2& old_size, const ImVec2& new_size);
     IMGUI_API void          ScaleWindowsInViewport(ImGuiViewportP* viewport, float scale);
+    IMGUI_API void          DestroyPlatformWindow(ImGuiViewportP* viewport);
     IMGUI_API void          SetWindowViewport(ImGuiWindow* window, ImGuiViewportP* viewport);
     IMGUI_API void          SetCurrentViewport(ImGuiWindow* window, ImGuiViewportP* viewport);
     IMGUI_API const ImGuiPlatformMonitor*   GetViewportPlatformMonitor(ImGuiViewport* viewport);
@@ -3838,6 +3868,7 @@ namespace ImGui
     IMGUI_API void          DebugNodeWindowsList(ImVector<ImGuiWindow*>* windows, const char* label);
     IMGUI_API void          DebugNodeWindowsListByBeginStackParent(ImGuiWindow** windows, int windows_size, ImGuiWindow* parent_in_begin_stack);
     IMGUI_API void          DebugNodeViewport(ImGuiViewportP* viewport);
+    IMGUI_API void          DebugNodePlatformMonitor(ImGuiPlatformMonitor* monitor, const char* label, int idx);
     IMGUI_API void          DebugRenderKeyboardPreview(ImDrawList* draw_list);
     IMGUI_API void          DebugRenderViewportThumbnail(ImDrawList* draw_list, ImGuiViewportP* viewport, const ImRect& bb);
 

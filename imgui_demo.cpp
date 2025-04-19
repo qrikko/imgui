@@ -314,6 +314,7 @@ struct ImGuiDemoWindowData
     bool ShowAppConsole = false;
     bool ShowAppCustomRendering = false;
     bool ShowAppDocuments = false;
+    bool ShowAppDockSpace = false;
     bool ShowAppLog = false;
     bool ShowAppLayout = false;
     bool ShowAppPropertyEditor = false;
@@ -355,7 +356,8 @@ void ImGui::ShowDemoWindow(bool* p_open)
 
     // Examples Apps (accessible from the "Examples" menu)
     if (demo_data.ShowMainMenuBar)          { ShowExampleAppMainMenuBar(); }
-    if (demo_data.ShowAppDocuments)         { ShowExampleAppDocuments(&demo_data.ShowAppDocuments); }
+    if (demo_data.ShowAppDockSpace)         { ShowExampleAppDockSpace(&demo_data.ShowAppDockSpace); } // Important: Process the Docking app first, as explicit DockSpace() nodes needs to be submitted early (read comments near the DockSpace function)
+    if (demo_data.ShowAppDocuments)         { ShowExampleAppDocuments(&demo_data.ShowAppDocuments); } // ...process the Document app next, as it may also use a DockSpace()
     if (demo_data.ShowAppAssetsBrowser)     { ShowExampleAppAssetsBrowser(&demo_data.ShowAppAssetsBrowser); }
     if (demo_data.ShowAppConsole)           { ShowExampleAppConsole(&demo_data.ShowAppConsole); }
     if (demo_data.ShowAppCustomRendering)   { ShowExampleAppCustomRendering(&demo_data.ShowAppCustomRendering); }
@@ -507,6 +509,44 @@ void ImGui::ShowDemoWindow(bool* p_open)
             ImGui::SameLine(); HelpMarker("Using directional navigation key makes the cursor visible. Mouse click hides the cursor.");
             ImGui::Checkbox("io.ConfigNavCursorVisibleAlways", &io.ConfigNavCursorVisibleAlways);
             ImGui::SameLine(); HelpMarker("Navigation cursor is always visible.");
+
+            ImGui::SeparatorText("Docking");
+            ImGui::CheckboxFlags("io.ConfigFlags: DockingEnable", &io.ConfigFlags, ImGuiConfigFlags_DockingEnable);
+            ImGui::SameLine();
+            if (io.ConfigDockingWithShift)
+                HelpMarker("Drag from window title bar or their tab to dock/undock. Hold SHIFT to enable docking.\n\nDrag from window menu button (upper-left button) to undock an entire node (all windows).");
+            else
+                HelpMarker("Drag from window title bar or their tab to dock/undock. Hold SHIFT to disable docking.\n\nDrag from window menu button (upper-left button) to undock an entire node (all windows).");
+            if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable)
+            {
+                ImGui::Indent();
+                ImGui::Checkbox("io.ConfigDockingNoSplit", &io.ConfigDockingNoSplit);
+                ImGui::SameLine(); HelpMarker("Simplified docking mode: disable window splitting, so docking is limited to merging multiple windows together into tab-bars.");
+                ImGui::Checkbox("io.ConfigDockingWithShift", &io.ConfigDockingWithShift);
+                ImGui::SameLine(); HelpMarker("Enable docking when holding Shift only (allow to drop in wider space, reduce visual noise)");
+                ImGui::Checkbox("io.ConfigDockingAlwaysTabBar", &io.ConfigDockingAlwaysTabBar);
+                ImGui::SameLine(); HelpMarker("Create a docking node and tab-bar on single floating windows.");
+                ImGui::Checkbox("io.ConfigDockingTransparentPayload", &io.ConfigDockingTransparentPayload);
+                ImGui::SameLine(); HelpMarker("Make window or viewport transparent when docking and only display docking boxes on the target viewport. Useful if rendering of multiple viewport cannot be synced. Best used with ConfigViewportsNoAutoMerge.");
+                ImGui::Unindent();
+            }
+
+            ImGui::SeparatorText("Multi-viewports");
+            ImGui::CheckboxFlags("io.ConfigFlags: ViewportsEnable", &io.ConfigFlags, ImGuiConfigFlags_ViewportsEnable);
+            ImGui::SameLine(); HelpMarker("[beta] Enable beta multi-viewports support. See ImGuiPlatformIO for details.");
+            if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+            {
+                ImGui::Indent();
+                ImGui::Checkbox("io.ConfigViewportsNoAutoMerge", &io.ConfigViewportsNoAutoMerge);
+                ImGui::SameLine(); HelpMarker("Set to make all floating imgui windows always create their own viewport. Otherwise, they are merged into the main host viewports when overlapping it.");
+                ImGui::Checkbox("io.ConfigViewportsNoTaskBarIcon", &io.ConfigViewportsNoTaskBarIcon);
+                ImGui::SameLine(); HelpMarker("Toggling this at runtime is normally unsupported (most platform backends won't refresh the task bar icon state right away).");
+                ImGui::Checkbox("io.ConfigViewportsNoDecoration", &io.ConfigViewportsNoDecoration);
+                ImGui::SameLine(); HelpMarker("Toggling this at runtime is normally unsupported (most platform backends won't refresh the decoration right away).");
+                ImGui::Checkbox("io.ConfigViewportsNoDefaultParent", &io.ConfigViewportsNoDefaultParent);
+                ImGui::SameLine(); HelpMarker("Toggling this at runtime is normally unsupported (most platform backends won't refresh the parenting right away).");
+                ImGui::Unindent();
+            }
 
             ImGui::SeparatorText("Windows");
             ImGui::Checkbox("io.ConfigWindowsResizeFromEdges", &io.ConfigWindowsResizeFromEdges);
@@ -677,6 +717,7 @@ static void DemoWindowMenuBar(ImGuiDemoWindowData* demo_data)
             ImGui::MenuItem("Console", NULL, &demo_data->ShowAppConsole);
             ImGui::MenuItem("Custom rendering", NULL, &demo_data->ShowAppCustomRendering);
             ImGui::MenuItem("Documents", NULL, &demo_data->ShowAppDocuments);
+            ImGui::MenuItem("Dockspace", NULL, &demo_data->ShowAppDockSpace);
             ImGui::MenuItem("Log", NULL, &demo_data->ShowAppLog);
             ImGui::MenuItem("Property editor", NULL, &demo_data->ShowAppPropertyEditor);
             ImGui::MenuItem("Simple layout", NULL, &demo_data->ShowAppLayout);
@@ -2182,18 +2223,24 @@ static void DemoWindowWidgetsQueryingStatuses()
             "IsWindowFocused() = %d\n"
             "IsWindowFocused(_ChildWindows) = %d\n"
             "IsWindowFocused(_ChildWindows|_NoPopupHierarchy) = %d\n"
+            "IsWindowFocused(_ChildWindows|_DockHierarchy) = %d\n"
             "IsWindowFocused(_ChildWindows|_RootWindow) = %d\n"
             "IsWindowFocused(_ChildWindows|_RootWindow|_NoPopupHierarchy) = %d\n"
+            "IsWindowFocused(_ChildWindows|_RootWindow|_DockHierarchy) = %d\n"
             "IsWindowFocused(_RootWindow) = %d\n"
             "IsWindowFocused(_RootWindow|_NoPopupHierarchy) = %d\n"
+            "IsWindowFocused(_RootWindow|_DockHierarchy) = %d\n"
             "IsWindowFocused(_AnyWindow) = %d\n",
             ImGui::IsWindowFocused(),
             ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows),
             ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows | ImGuiFocusedFlags_NoPopupHierarchy),
+            ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows | ImGuiFocusedFlags_DockHierarchy),
             ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows | ImGuiFocusedFlags_RootWindow),
             ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows | ImGuiFocusedFlags_RootWindow | ImGuiFocusedFlags_NoPopupHierarchy),
+            ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows | ImGuiFocusedFlags_RootWindow | ImGuiFocusedFlags_DockHierarchy),
             ImGui::IsWindowFocused(ImGuiFocusedFlags_RootWindow),
             ImGui::IsWindowFocused(ImGuiFocusedFlags_RootWindow | ImGuiFocusedFlags_NoPopupHierarchy),
+            ImGui::IsWindowFocused(ImGuiFocusedFlags_RootWindow | ImGuiFocusedFlags_DockHierarchy),
             ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow));
 
         // Testing IsWindowHovered() function with its various flags.
@@ -2203,10 +2250,13 @@ static void DemoWindowWidgetsQueryingStatuses()
             "IsWindowHovered(_AllowWhenBlockedByActiveItem) = %d\n"
             "IsWindowHovered(_ChildWindows) = %d\n"
             "IsWindowHovered(_ChildWindows|_NoPopupHierarchy) = %d\n"
+            "IsWindowHovered(_ChildWindows|_DockHierarchy) = %d\n"
             "IsWindowHovered(_ChildWindows|_RootWindow) = %d\n"
             "IsWindowHovered(_ChildWindows|_RootWindow|_NoPopupHierarchy) = %d\n"
+            "IsWindowHovered(_ChildWindows|_RootWindow|_DockHierarchy) = %d\n"
             "IsWindowHovered(_RootWindow) = %d\n"
             "IsWindowHovered(_RootWindow|_NoPopupHierarchy) = %d\n"
+            "IsWindowHovered(_RootWindow|_DockHierarchy) = %d\n"
             "IsWindowHovered(_ChildWindows|_AllowWhenBlockedByPopup) = %d\n"
             "IsWindowHovered(_AnyWindow) = %d\n"
             "IsWindowHovered(_Stationary) = %d\n",
@@ -2215,10 +2265,13 @@ static void DemoWindowWidgetsQueryingStatuses()
             ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem),
             ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows),
             ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_NoPopupHierarchy),
+            ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_DockHierarchy),
             ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_RootWindow),
             ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_RootWindow | ImGuiHoveredFlags_NoPopupHierarchy),
+            ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_RootWindow | ImGuiHoveredFlags_DockHierarchy),
             ImGui::IsWindowHovered(ImGuiHoveredFlags_RootWindow),
             ImGui::IsWindowHovered(ImGuiHoveredFlags_RootWindow | ImGuiHoveredFlags_NoPopupHierarchy),
+            ImGui::IsWindowHovered(ImGuiHoveredFlags_RootWindow | ImGuiHoveredFlags_DockHierarchy),
             ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByPopup),
             ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow),
             ImGui::IsWindowHovered(ImGuiHoveredFlags_Stationary));
@@ -2231,10 +2284,13 @@ static void DemoWindowWidgetsQueryingStatuses()
 
         // Calling IsItemHovered() after begin returns the hovered status of the title bar.
         // This is useful in particular if you want to create a context menu associated to the title bar of a window.
+        // This will also work when docked into a Tab (the Tab replace the Title Bar and guarantee the same properties).
         static bool test_window = false;
         ImGui::Checkbox("Hovered/Active tests after Begin() for title bar testing", &test_window);
         if (test_window)
         {
+            // FIXME-DOCK: This window cannot be docked within the ImGui Demo window, this will cause a feedback loop and get them stuck.
+            // Could we fix this through an ImGuiWindowClass feature? Or an API call to tag our parent as "don't skip items"?
             ImGui::Begin("Title bar Hovered/Active tests", &test_window);
             if (ImGui::BeginPopupContextItem()) // <-- This is using IsItemHovered()
             {
@@ -8108,6 +8164,10 @@ void ImGui::ShowAboutWindow(bool* p_open)
         if (io.ConfigFlags & ImGuiConfigFlags_NoMouse)                  ImGui::Text(" NoMouse");
         if (io.ConfigFlags & ImGuiConfigFlags_NoMouseCursorChange)      ImGui::Text(" NoMouseCursorChange");
         if (io.ConfigFlags & ImGuiConfigFlags_NoKeyboard)               ImGui::Text(" NoKeyboard");
+        if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable)            ImGui::Text(" DockingEnable");
+        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)          ImGui::Text(" ViewportsEnable");
+        if (io.ConfigFlags & ImGuiConfigFlags_DpiEnableScaleViewports)  ImGui::Text(" DpiEnableScaleViewports");
+        if (io.ConfigFlags & ImGuiConfigFlags_DpiEnableScaleFonts)      ImGui::Text(" DpiEnableScaleFonts");
         if (io.MouseDrawCursor)                                         ImGui::Text("io.MouseDrawCursor");
         if (io.ConfigViewportsNoAutoMerge)                              ImGui::Text("io.ConfigViewportsNoAutoMerge");
         if (io.ConfigViewportsNoTaskBarIcon)                            ImGui::Text("io.ConfigViewportsNoTaskBarIcon");
