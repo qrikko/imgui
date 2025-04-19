@@ -10,7 +10,8 @@ project "imgui"
 
 	includedirs {
 		"./",
-		"./backends/"
+		"./backends/",
+        engine.dependency.vulkan,
 	}
 
 	symbols "on"
