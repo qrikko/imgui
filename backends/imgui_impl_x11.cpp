@@ -37,7 +37,6 @@ struct ImGui_ImplX11_Data
 	unsigned int          mod_flags;
 };
 
-
 static ImGui_ImplX11_Data* ImGui_ImplX11_GetBackendData()
 {
     return ImGui::GetCurrentContext() ? (ImGui_ImplX11_Data*)ImGui::GetIO().BackendPlatformUserData : nullptr;
@@ -80,6 +79,12 @@ IMGUI_IMPL_API void ImGui_ImplX11_Init(void *window, void *display)
 void ImGui_ImplX11_Shutdown() {
 	ImGui_ImplX11_Data *bd = ImGui_ImplX11_GetBackendData();
 	ImGuiIO &io = ImGui::GetIO();
+
+    io.BackendPlatformName = nullptr;
+    io.BackendPlatformUserData = nullptr;
+    io.BackendFlags &= ~(ImGuiBackendFlags_HasMouseCursors | ImGuiBackendFlags_HasSetMousePos | ImGuiBackendFlags_HasGamepad | ImGuiBackendFlags_PlatformHasViewports | ImGuiBackendFlags_HasMouseHoveredViewport);
+    //ImGui_ImplX11_ContextMap_Remove(bd->window);
+    IM_DELETE(bd);
 }
 
 static bool ImGui_ImplX11_UpdateMouseCursor() {
