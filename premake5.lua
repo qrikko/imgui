@@ -15,7 +15,7 @@ project "imgui"
 	}
 
 	symbols "on"
-	links { "vulkan" }
+	links { "vulkan", "GL" }
 
 	linkoptions { "-fPIC", "-O0", "-lstdc++" }
 	buildoptions { "-fPIC", "-O0", "-g", "-fno-exceptions" }
