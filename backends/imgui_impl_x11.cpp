@@ -326,6 +326,12 @@ IMGUI_IMPL_API void ImGui_ImplX11_ProcessEvent(void *event)
 				case 5:
 					io.AddMouseWheelEvent(0.0f, -bd->scroll_speed);
 				break;
+                case 6:
+					io.AddMouseWheelEvent(bd->scroll_speed, 0.0f);
+                    break;
+                case 7:
+					io.AddMouseWheelEvent(-bd->scroll_speed, 0.0f);
+                    break;
 				default:
 					io.MouseDown[xevent->xbutton.button] = true;
 				break;
